@@ -509,7 +509,10 @@ pub fn layered_architecture_example() -> Graph {
 pub fn print_subgraph_hierarchy(graph: &Graph, root: NodeIndex, indent: usize) {
     if let Some(label) = graph.node_label(root) {
         let spaces = "  ".repeat(indent);
-        println!("{}{}", spaces, label.label.as_deref().unwrap_or("Unnamed"));
+        println!(
+            "{} x:{:?} y:{:?} rank: {:?}",
+            spaces, label.x, label.y, label.rank
+        );
 
         // 查找所有子节点
         for node_id in graph.node_indices() {
@@ -1181,41 +1184,40 @@ mod tests {
 fn main() {
     println!("=== 子图示例 ===\n");
 
-    // 示例1：简单子图
-    println!("1. 简单子图示例:");
-    let simple_graph = simple_subgraph_example();
-    let root_nodes = get_root_nodes(&simple_graph);
-    if !root_nodes.is_empty() {
-        print_subgraph_hierarchy(&simple_graph, root_nodes[0], 0);
-    }
-    println!();
+    // // 示例1：简单子图
+    // println!("1. 简单子图示例:");
+    // let simple_graph = simple_subgraph_example();
+    // let root_nodes = get_root_nodes(&simple_graph);
+    // if !root_nodes.is_empty() {
+    //     print_subgraph_hierarchy(&simple_graph, root_nodes[0], 0);
+    // }
 
-    // 示例2：嵌套子图
-    println!("2. 嵌套子图示例:");
-    let nested_graph = nested_subgraph_example();
-    let root_nodes = get_root_nodes(&nested_graph);
-    if !root_nodes.is_empty() {
-        print_subgraph_hierarchy(&nested_graph, root_nodes[0], 0);
-    }
-    println!();
+    // // 示例2：嵌套子图
+    // println!("2. 嵌套子图示例:");
+    // let nested_graph = nested_subgraph_example();
+    // let root_nodes = get_root_nodes(&nested_graph);
+    // if !root_nodes.is_empty() {
+    //     print_subgraph_hierarchy(&nested_graph, root_nodes[0], 0);
+    // }
+    // println!();
 
-    // 示例3：组织架构图
-    println!("3. 组织架构图示例:");
-    let org_graph = organizational_chart_example();
-    let root_nodes = get_root_nodes(&org_graph);
-    if !root_nodes.is_empty() {
-        print_subgraph_hierarchy(&org_graph, root_nodes[0], 0);
-    }
-    println!();
+    // // 示例3：组织架构图
+    // println!("3. 组织架构图示例:");
+    // let org_graph = organizational_chart_example();
+    // let root_nodes = get_root_nodes(&org_graph);
+    // if !root_nodes.is_empty() {
+    //     print_subgraph_hierarchy(&org_graph, root_nodes[0], 0);
+    // }
+    // println!();
 
-    // 示例4：分层架构图
-    println!("4. 分层架构图示例:");
-    let layered_graph = layered_architecture_example();
-    let root_nodes = get_root_nodes(&layered_graph);
-    if !root_nodes.is_empty() {
-        print_subgraph_hierarchy(&layered_graph, root_nodes[0], 0);
-    }
-    println!();
+    // // 示例4：分层架构图
+    // println!("4. 分层架构图示例:");
+    // let layered_graph = layered_architecture_example();
+    // let root_nodes = get_root_nodes(&layered_graph);
+    // if !root_nodes.is_empty() {
+    //     print_subgraph_hierarchy(&layered_graph, root_nodes[0], 0);
+    // }
+    // println!();
 
     // 运行布局算法并生成SVG
     println!("5. 运行布局算法并生成SVG:");
@@ -1223,7 +1225,11 @@ fn main() {
     layout::layout(&mut layout_graph, Some(&LayoutOptions::default()));
     println!("布局算法执行成功！");
 
-    // 生成SVG
+    // if !root_nodes.is_empty() {
+    //     print_subgraph_hierarchy(&layout_graph, root_nodes[0], 0);
+    // }
+
+    // // 生成SVG
     let svg_content = graph_to_svg_enhanced(&layout_graph);
     println!("SVG内容长度: {} 字符", svg_content.len());
 
@@ -1233,32 +1239,32 @@ fn main() {
         Err(e) => println!("保存SVG文件失败: {}", e),
     }
 
-    // 生成其他示例的SVG
-    println!("\n6. 生成其他示例的SVG:");
+    // // 生成其他示例的SVG
+    // println!("\n6. 生成其他示例的SVG:");
 
-    // 嵌套子图示例
-    let mut nested_graph = nested_subgraph_example();
-    layout::layout(&mut nested_graph, Some(&LayoutOptions::default()));
-    match save_graph_as_svg(&nested_graph, "nested_subgraph.svg") {
-        Ok(_) => println!("嵌套子图SVG已保存为: nested_subgraph.svg"),
-        Err(e) => println!("保存嵌套子图SVG失败: {}", e),
-    }
+    // // 嵌套子图示例
+    // let mut nested_graph = nested_subgraph_example();
+    // layout::layout(&mut nested_graph, Some(&LayoutOptions::default()));
+    // match save_graph_as_svg(&nested_graph, "nested_subgraph.svg") {
+    //     Ok(_) => println!("嵌套子图SVG已保存为: nested_subgraph.svg"),
+    //     Err(e) => println!("保存嵌套子图SVG失败: {}", e),
+    // }
 
-    // 组织架构图示例
-    let mut org_graph = organizational_chart_example();
-    layout::layout(&mut org_graph, Some(&LayoutOptions::default()));
-    match save_graph_as_svg(&org_graph, "organizational_chart.svg") {
-        Ok(_) => println!("组织架构图SVG已保存为: organizational_chart.svg"),
-        Err(e) => println!("保存组织架构图SVG失败: {}", e),
-    }
+    // // 组织架构图示例
+    // let mut org_graph = organizational_chart_example();
+    // layout::layout(&mut org_graph, Some(&LayoutOptions::default()));
+    // match save_graph_as_svg(&org_graph, "organizational_chart.svg") {
+    //     Ok(_) => println!("组织架构图SVG已保存为: organizational_chart.svg"),
+    //     Err(e) => println!("保存组织架构图SVG失败: {}", e),
+    // }
 
-    // 分层架构图示例
-    let mut layered_graph = layered_architecture_example();
-    layout::layout(&mut layered_graph, Some(&LayoutOptions::default()));
-    match save_graph_as_svg(&layered_graph, "layered_architecture.svg") {
-        Ok(_) => println!("分层架构图SVG已保存为: layered_architecture.svg"),
-        Err(e) => println!("保存分层架构图SVG失败: {}", e),
-    }
+    // // 分层架构图示例
+    // let mut layered_graph = layered_architecture_example();
+    // layout::layout(&mut layered_graph, Some(&LayoutOptions::default()));
+    // match save_graph_as_svg(&layered_graph, "layered_architecture.svg") {
+    //     Ok(_) => println!("分层架构图SVG已保存为: layered_architecture.svg"),
+    //     Err(e) => println!("保存分层架构图SVG失败: {}", e),
+    // }
 
     // 复杂网络图示例（展示折线效果）
     println!("\n7. 生成复杂网络图（展示折线效果）:");

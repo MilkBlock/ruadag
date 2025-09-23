@@ -15,10 +15,10 @@ fn log_graph_state(graph: &Graph, stage: &str) {
     println!("节点:");
     for node_idx in graph.node_indices() {
         let node = graph.node_label(node_idx).unwrap();
-        println!(
-            "  {:?}: rank={:?}, x={:?}, y={:?}, width={}, height={}",
-            node_idx, node.rank, node.x, node.y, node.width, node.height
-        );
+        // println!(
+        //     "  {:?}: rank={:?}, x={:?}, y={:?}, width={}, height={}",
+        //     node_idx, node.rank, node.x, node.y, node.width, node.height
+        // );
     }
 
     println!("边:");
@@ -73,6 +73,7 @@ pub fn layout(graph: &mut Graph, opts: Option<&LayoutOptions>) {
 ///
 /// 对应 JS 函数: buildLayoutGraph() in lib/layout.js
 fn build_layout_graph(input_graph: &Graph) -> Graph {
+    println!("=== 开始构建布局图 ===");
     let mut layout_graph = Graph::with_config(input_graph.config().clone());
 
     // 复制节点
@@ -88,6 +89,9 @@ fn build_layout_graph(input_graph: &Graph) -> Graph {
             if new_label.height == 0.0 {
                 new_label.height = 0.0;
             }
+
+            // 调试：检查 rank 是否被正确复制
+            println!("复制节点 {:?}: rank = {:?}", node_index, new_label.rank);
 
             let new_node_index = layout_graph.add_node(new_label);
             node_mapping.insert(node_index, new_node_index);
@@ -133,6 +137,7 @@ fn build_layout_graph(input_graph: &Graph) -> Graph {
         }
     }
 
+    println!("=== 布局图构建完成 ===");
     layout_graph
 }
 

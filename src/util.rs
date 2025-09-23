@@ -40,6 +40,7 @@ pub fn build_layer_matrix(graph: &Graph) -> Vec<Vec<NodeIndex>> {
                         }
                         // 使用原始节点ID，但确保它属于正确的图
                         layer[order as usize] = node_id;
+                        println!("rank is {:?}", label.rank);
                     } else {
                         // 如果没有 order，直接 push
                         layer.push(node_id);
@@ -171,11 +172,15 @@ pub fn normalize_ranks(graph: &mut Graph) {
 /// 移除空排名
 pub fn remove_empty_ranks(graph: &mut Graph) {
     let layers = build_layer_matrix(graph);
+    let max_rank_val = max_rank(graph);
+    let min_rank_val = min_rank(graph);
+
     let mut rank_shift = IndexMap::new();
     let mut current_rank = 0;
 
-    for rank in 0..=max_rank(graph) {
-        if (rank as usize) < layers.len() && !layers[rank as usize].is_empty() {
+    for rank in min_rank_val..=max_rank_val {
+        let adjusted_rank = (rank - min_rank_val) as usize;
+        if adjusted_rank < layers.len() && !layers[adjusted_rank].is_empty() {
             rank_shift.insert(rank, current_rank);
             current_rank += 1;
         }
@@ -292,11 +297,37 @@ where
 }
 
 /// 作为非复合图处理
-pub fn as_non_compound_graph(graph: &Graph) -> &Graph {
-    // 对于复合图，这里应该返回一个简化的非复合版本
-    // 目前简化实现，直接返回原图
-    // 在实际实现中，这里应该移除复合图的层次结构
-    graph
+///
+/// 对应 JS 函数: asNonCompoundGraph() in lib/util.js
+/// 只包含没有子节点的节点，排除子图节点
+/// 返回 (simplified_graph, old_to_new_mapping)
+pub fn as_non_compound_graph(graph: &Graph) -> (Graph, IndexMap<NodeIndex, NodeIndex>) {
+    let mut simplified = Graph::new();
+    simplified.set_config(graph.config().clone());
+    let mut old_to_new = IndexMap::new();
+
+    // 只添加没有子节点的节点（叶子节点）
+    for old_node_id in graph.node_indices() {
+        if graph.children(old_node_id).is_empty() {
+            if let Some(label) = graph.node_label(old_node_id) {
+                let new_node_id = simplified.add_node(label.clone());
+                old_to_new.insert(old_node_id, new_node_id);
+            }
+        }
+    }
+
+    // 添加所有边（只添加两个端点都在简化图中的边）
+    for edge in graph.edges() {
+        if let (Some(&new_source), Some(&new_target)) =
+            (old_to_new.get(&edge.source), old_to_new.get(&edge.target))
+        {
+            if let Some(edge_label) = graph.edge_label(&edge) {
+                simplified.add_edge(Edge::new(new_source, new_target), edge_label.clone());
+            }
+        }
+    }
+
+    (simplified, old_to_new)
 }
 
 /// 计算交叉数

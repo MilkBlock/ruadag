@@ -125,8 +125,35 @@ impl Graph {
         NodeIndex::new(node_index, self.graph_id)
     }
 
+    /// 创建边（使用正确的图ID）
+    pub fn create_edge(&self, source: NodeIndex, target: NodeIndex) -> Edge {
+        // 验证source和target是否属于当前图
+        if !source.belongs_to_graph(self.graph_id) {
+            panic!(
+                "Source node belongs to graph {}, but current graph is {}",
+                source.which_graph, self.graph_id
+            );
+        }
+        if !target.belongs_to_graph(self.graph_id) {
+            panic!(
+                "Target node belongs to graph {}, but current graph is {}",
+                target.which_graph, self.graph_id
+            );
+        }
+        
+        let mut edge = Edge::new(source, target);
+        edge.source.set_graph_id(self.graph_id);
+        edge.target.set_graph_id(self.graph_id);
+        edge
+    }
+
+    /// 创建用于查询的边（使用正确的图ID）
+    pub fn create_query_edge(&self, source: NodeIndex, target: NodeIndex) -> Edge {
+        self.create_edge(source, target)
+    }
+
     /// 添加边
-    pub fn add_edge(&mut self, edge: Edge, label: EdgeLabel) -> EdgeIndex {
+    pub fn add_edge(&mut self, mut edge: Edge, label: EdgeLabel) -> EdgeIndex {
         // 验证边的节点是否属于当前图
         if !edge.source.belongs_to_graph(self.graph_id) {
             panic!(
@@ -140,6 +167,10 @@ impl Graph {
                 edge.target.which_graph, self.graph_id
             );
         }
+
+        // 确保Edge的图ID正确
+        edge.source.set_graph_id(self.graph_id);
+        edge.target.set_graph_id(self.graph_id);
 
         let edge_index = self
             .graph

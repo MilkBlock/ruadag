@@ -150,3 +150,4 @@ fn test_handles_single_node_without_rank() {
     // Should not panic, even without rank
     assert!(g.has_node(a));
 }
+

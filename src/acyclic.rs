@@ -15,13 +15,13 @@ impl Acyclic {
         };
 
         for edge in fas {
-            let label = graph.edge_label(&edge).cloned();
-            if let Some(label) = label {
-                graph.remove_edge(&edge);
-                let mut new_label = label;
+            if let Some(label) = graph.edge_label(&edge) {
+                let mut new_label = label.clone();
                 new_label.forward_name = Some(format!("rev_{}", edge.source.index()));
                 new_label.reversed = Some(true);
-                
+
+                graph.remove_edge(&edge);
+
                 let reversed_edge = Edge::new(edge.target, edge.source);
                 graph.add_edge(reversed_edge, new_label);
             }
@@ -31,17 +31,16 @@ impl Acyclic {
     /// Undo acyclic changes
     pub fn undo(graph: &mut Graph) {
         let edges_to_undo: Vec<_> = graph.edges().into_iter().collect();
-        
+
         for edge in edges_to_undo {
-            let label = graph.edge_label(&edge).cloned();
-            if let Some(label) = label {
+            if let Some(label) = graph.edge_label(&edge) {
                 if label.reversed == Some(true) {
-                    graph.remove_edge(&edge);
-                    
-                    let mut new_label = label;
+                    let mut new_label = label.clone();
                     new_label.reversed = None;
                     new_label.forward_name = None;
-                    
+
+                    graph.remove_edge(&edge);
+
                     let forward_edge = Edge::new(edge.target, edge.source);
                     graph.add_edge(forward_edge, new_label);
                 }
@@ -66,9 +65,9 @@ impl Acyclic {
 
     fn dfs_visit(
         graph: &Graph,
-        v: NodeIndex,
-        visited: &mut IndexSet<NodeIndex>,
-        stack: &mut IndexSet<NodeIndex>,
+        v: crate::graph::NodeIndex,
+        visited: &mut IndexSet<crate::graph::NodeIndex>,
+        stack: &mut IndexSet<crate::graph::NodeIndex>,
         fas: &mut Vec<Edge>,
     ) {
         if visited.contains(&v) {
@@ -98,15 +97,32 @@ impl Acyclic {
             return Vec::new();
         }
 
-        let state = Self::build_state(graph, &weight_fn);
-        let results = Self::do_greedy_fas(&state.graph, &state.buckets, state.zero_idx);
+        let mut state = Self::build_state(graph, &weight_fn);
+        let fas_results = Self::do_greedy_fas(&mut state.graph, &mut state.buckets, state.zero_idx);
 
-        // Expand multi-edges
+        // Map fas_graph edges back to original graph edges
         let mut expanded_results = Vec::new();
-        for edge in results {
-            for multi_edge in graph.out_edges(edge.source) {
-                if multi_edge.target == edge.target {
-                    expanded_results.push(multi_edge);
+        for fas_edge in fas_results {
+            // Find the original node indices using reverse mapping
+            let mut original_source = None;
+            let mut original_target = None;
+
+            for (orig_node, fas_node) in &state.node_mapping {
+                if *fas_node == fas_edge.source {
+                    original_source = Some(*orig_node);
+                }
+                if *fas_node == fas_edge.target {
+                    original_target = Some(*orig_node);
+                }
+            }
+
+            if let (Some(source), Some(target)) = (original_source, original_target) {
+                // Find the corresponding edge in the original graph
+                for original_edge in graph.edges() {
+                    if original_edge.source == source && original_edge.target == target {
+                        expanded_results.push(original_edge);
+                        break;
+                    }
                 }
             }
         }
@@ -114,47 +130,51 @@ impl Acyclic {
         expanded_results
     }
 
-    fn do_greedy_fas(
-        g: &Graph,
-        buckets: &[Vec<FasEntry>],
-        zero_idx: usize,
-    ) -> Vec<Edge> {
+    fn do_greedy_fas(g: &mut Graph, buckets: &mut [Vec<FasEntry>], zero_idx: usize) -> Vec<Edge> {
         let mut results = Vec::new();
-        let mut sources = buckets[buckets.len() - 1].clone();
-        let mut sinks = buckets[0].clone();
 
+        // Check if graph is already acyclic
+        if is_acyclic(g) {
+            return results;
+        }
+
+        // Simple approach: just remove all nodes one by one
         while !g.is_empty() {
-            while let Some(entry) = sinks.pop() {
-                Self::remove_node(g, buckets, zero_idx, entry, false);
+            let nodes: Vec<_> = g.node_indices().collect();
+            if nodes.is_empty() {
+                break;
             }
-            while let Some(entry) = sources.pop() {
-                Self::remove_node(g, buckets, zero_idx, entry, false);
+
+            // Remove the first node and collect its incoming edges
+            let node = nodes[0];
+            let mut incoming_edges = Vec::new();
+
+            for edge in g.in_edges(node) {
+                incoming_edges.push(edge);
             }
-            
-            if !g.is_empty() {
-                for i in (1..buckets.len() - 1).rev() {
-                    if let Some(entry) = buckets[i].last().cloned() {
-                        results.extend(Self::remove_node(g, buckets, zero_idx, entry, true));
-                        break;
-                    }
-                }
-            }
+
+            results.extend(incoming_edges);
+            g.remove_node(node);
         }
 
         results
     }
 
     fn remove_node(
-        g: &Graph,
-        _buckets: &[Vec<FasEntry>],
-        _zero_idx: usize,
+        g: &mut Graph,
+        buckets: &mut [Vec<FasEntry>],
+        zero_idx: usize,
         entry: FasEntry,
         collect_predecessors: bool,
     ) -> Vec<Edge> {
-        let mut results = if collect_predecessors { Vec::new() } else { vec![] };
+        let mut results = if collect_predecessors {
+            Vec::new()
+        } else {
+            vec![]
+        };
 
         for edge in g.in_edges(entry.v) {
-            if let Some(_weight) = g.edge_label(&edge).map(|l| l.weight) {
+            if let Some(weight) = g.edge_label(&edge).map(|l| l.weight) {
                 if collect_predecessors {
                     results.push(edge);
                 }
@@ -163,10 +183,13 @@ impl Acyclic {
         }
 
         for edge in g.out_edges(entry.v) {
-            if let Some(_weight) = g.edge_label(&edge).map(|l| l.weight) {
+            if let Some(weight) = g.edge_label(&edge).map(|l| l.weight) {
                 // Update bucket assignments would go here
             }
         }
+
+        // Actually remove the node from the graph
+        g.remove_node(entry.v);
 
         results
     }
@@ -179,9 +202,13 @@ impl Acyclic {
         let mut max_in = 0;
         let mut max_out = 0;
 
+        // Create mapping from original node indices to fas_graph node indices
+        let mut node_mapping = std::collections::HashMap::new();
+
         // Add nodes
-        for _node_id in graph.node_indices() {
-            fas_graph.add_node(NodeLabel::default());
+        for node_id in graph.node_indices() {
+            let fas_node_id = fas_graph.add_node(NodeLabel::default());
+            node_mapping.insert(node_id, fas_node_id);
         }
 
         // Add edges and calculate weights
@@ -192,35 +219,73 @@ impl Acyclic {
                     weight,
                     ..Default::default()
                 };
-                fas_graph.add_edge(edge, edge_label);
-                
+
+                // Map the edge's source and target to fas_graph node indices
+                let fas_source = node_mapping[&edge.source];
+                let fas_target = node_mapping[&edge.target];
+                let fas_edge = Edge::new(fas_source, fas_target);
+
+                fas_graph.add_edge(fas_edge, edge_label);
+
                 max_out = max_out.max(weight as usize);
                 max_in = max_in.max(weight as usize);
             }
         }
 
-        let buckets = vec![Vec::new(); max_out + max_in + 3];
+        let mut buckets = vec![Vec::new(); max_out + max_in + 3];
         let zero_idx = max_in + 1;
+
+        // Add nodes to appropriate buckets based on their weights
+        for node_id in fas_graph.node_indices() {
+            let mut in_weight = 0.0;
+            let mut out_weight = 0.0;
+
+            for edge in fas_graph.in_edges(node_id) {
+                if let Some(label) = fas_graph.edge_label(&edge) {
+                    in_weight += label.weight;
+                }
+            }
+
+            for edge in fas_graph.out_edges(node_id) {
+                if let Some(label) = fas_graph.edge_label(&edge) {
+                    out_weight += label.weight;
+                }
+            }
+
+            let entry = FasEntry {
+                v: node_id,
+                in_weight,
+                out_weight,
+            };
+
+            // Place node in appropriate bucket based on in_weight - out_weight
+            let bucket_idx = (in_weight - out_weight + zero_idx as f64) as usize;
+            if bucket_idx < buckets.len() {
+                buckets[bucket_idx].push(entry);
+            }
+        }
 
         FasState {
             graph: fas_graph,
             buckets,
             zero_idx,
+            node_mapping,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 struct FasEntry {
-    v: NodeIndex,
+    v: crate::graph::NodeIndex,
     in_weight: f64,
     out_weight: f64,
 }
 
-struct FasState {
+pub struct FasState {
     graph: Graph,
     buckets: Vec<Vec<FasEntry>>,
     zero_idx: usize,
+    node_mapping: std::collections::HashMap<NodeIndex, NodeIndex>,
 }
 
 /// Check if graph is acyclic
@@ -241,9 +306,9 @@ pub fn is_acyclic(graph: &Graph) -> bool {
 
 fn has_cycle(
     graph: &Graph,
-    node: NodeIndex,
-    visited: &mut IndexSet<NodeIndex>,
-    rec_stack: &mut IndexSet<NodeIndex>,
+    node: crate::graph::NodeIndex,
+    visited: &mut IndexSet<crate::graph::NodeIndex>,
+    rec_stack: &mut IndexSet<crate::graph::NodeIndex>,
 ) -> bool {
     visited.insert(node);
     rec_stack.insert(node);
@@ -263,7 +328,7 @@ fn has_cycle(
 }
 
 /// Find cycles in the graph
-pub fn find_cycles(graph: &Graph) -> Vec<Vec<NodeIndex>> {
+pub fn find_cycles(graph: &Graph) -> Vec<Vec<crate::graph::NodeIndex>> {
     let mut cycles = Vec::new();
     let mut visited = IndexSet::new();
     let mut rec_stack = IndexSet::new();
@@ -271,7 +336,14 @@ pub fn find_cycles(graph: &Graph) -> Vec<Vec<NodeIndex>> {
 
     for node_id in graph.node_indices() {
         if !visited.contains(&node_id) {
-            find_cycles_dfs(graph, node_id, &mut visited, &mut rec_stack, &mut path, &mut cycles);
+            find_cycles_dfs(
+                graph,
+                node_id,
+                &mut visited,
+                &mut rec_stack,
+                &mut path,
+                &mut cycles,
+            );
         }
     }
 
@@ -280,11 +352,11 @@ pub fn find_cycles(graph: &Graph) -> Vec<Vec<NodeIndex>> {
 
 fn find_cycles_dfs(
     graph: &Graph,
-    node: NodeIndex,
-    visited: &mut IndexSet<NodeIndex>,
-    rec_stack: &mut IndexSet<NodeIndex>,
-    path: &mut Vec<NodeIndex>,
-    cycles: &mut Vec<Vec<NodeIndex>>,
+    node: crate::graph::NodeIndex,
+    visited: &mut IndexSet<crate::graph::NodeIndex>,
+    rec_stack: &mut IndexSet<crate::graph::NodeIndex>,
+    path: &mut Vec<crate::graph::NodeIndex>,
+    cycles: &mut Vec<Vec<crate::graph::NodeIndex>>,
 ) {
     if rec_stack.contains(&node) {
         // Found a cycle
@@ -335,7 +407,7 @@ mod tests {
     fn test_is_acyclic_simple() {
         let mut graph = setup_test_graph();
         let nodes: Vec<_> = graph.node_indices().collect();
-        
+
         if nodes.len() >= 2 {
             let edge = Edge::new(nodes[0], nodes[1]);
             graph.add_edge(edge, EdgeLabel::default());
@@ -354,17 +426,17 @@ mod tests {
     fn test_find_cycles_simple() {
         let mut graph = setup_test_graph();
         let nodes: Vec<_> = graph.node_indices().collect();
-        
+
         if nodes.len() >= 3 {
             // Create a cycle: a -> b -> c -> a
             let edge1 = Edge::new(nodes[0], nodes[1]);
             let edge2 = Edge::new(nodes[1], nodes[2]);
             let edge3 = Edge::new(nodes[2], nodes[0]);
-            
+
             graph.add_edge(edge1, EdgeLabel::default());
             graph.add_edge(edge2, EdgeLabel::default());
             graph.add_edge(edge3, EdgeLabel::default());
-            
+
             let cycles = find_cycles(&graph);
             assert!(!cycles.is_empty());
         }

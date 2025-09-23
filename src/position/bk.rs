@@ -375,13 +375,18 @@ impl BrandesKoepf {
     /// assert!(bk.layers[2].contains(&c));
     /// ```
     pub fn build_layers(&mut self) {
+        let min_rank = self.ranks.values().min().copied().unwrap_or(0);
         let max_rank = self.ranks.values().max().copied().unwrap_or(0);
-        self.layers = vec![Vec::new(); (max_rank + 1) as usize];
+        let rank_count = (max_rank - min_rank + 1) as usize;
+        self.layers = vec![Vec::new(); rank_count];
 
         for (node, &rank) in &self.ranks {
             // 跳过占位符节点
             if !is_placeholder(*node) {
-                self.layers[rank as usize].push(*node);
+                let adjusted_rank = (rank - min_rank) as usize;
+                if adjusted_rank < self.layers.len() {
+                    self.layers[adjusted_rank].push(*node);
+                }
             }
         }
 

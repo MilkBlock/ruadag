@@ -120,3 +120,4 @@ fn test_works_for_graph_1() {
     let layering2 = vec![vec![d, a], vec![e, b, f], vec![c, i]];
     assert_eq!(cross_count(&g, &layering2), 0);
 }
+

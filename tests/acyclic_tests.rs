@@ -37,10 +37,10 @@ fn test_does_not_change_already_acyclic_graph_greedy() {
     let c = g.add_node(NodeLabel::default());
     let d = g.add_node(NodeLabel::default());
     
-    g.add_edge(Edge::new(a, b), EdgeLabel::default());
-    g.add_edge(Edge::new(a, c), EdgeLabel::default());
-    g.add_edge(Edge::new(b, d), EdgeLabel::default());
-    g.add_edge(Edge::new(c, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, b), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, c), EdgeLabel::default());
+    g.add_edge(g.create_edge(b, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(c, d), EdgeLabel::default());
     
     Acyclic::run(&mut g);
     
@@ -48,10 +48,10 @@ fn test_does_not_change_already_acyclic_graph_greedy() {
     results = sort_edges(results);
     
     let expected = vec![
-        Edge::new(a, b),
-        Edge::new(a, c),
-        Edge::new(b, d),
-        Edge::new(c, d),
+        g.create_query_edge(a, b),
+        g.create_query_edge(a, c),
+        g.create_query_edge(b, d),
+        g.create_query_edge(c, d),
     ];
     
     assert_eq!(results, expected);
@@ -67,10 +67,10 @@ fn test_does_not_change_already_acyclic_graph_dfs() {
     let c = g.add_node(NodeLabel::default());
     let d = g.add_node(NodeLabel::default());
     
-    g.add_edge(Edge::new(a, b), EdgeLabel::default());
-    g.add_edge(Edge::new(a, c), EdgeLabel::default());
-    g.add_edge(Edge::new(b, d), EdgeLabel::default());
-    g.add_edge(Edge::new(c, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, b), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, c), EdgeLabel::default());
+    g.add_edge(g.create_edge(b, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(c, d), EdgeLabel::default());
     
     Acyclic::run(&mut g);
     
@@ -78,10 +78,10 @@ fn test_does_not_change_already_acyclic_graph_dfs() {
     results = sort_edges(results);
     
     let expected = vec![
-        Edge::new(a, b),
-        Edge::new(a, c),
-        Edge::new(b, d),
-        Edge::new(c, d),
+        g.create_query_edge(a, b),
+        g.create_query_edge(a, c),
+        g.create_query_edge(b, d),
+        g.create_query_edge(c, d),
     ];
     
     assert_eq!(results, expected);
@@ -97,10 +97,10 @@ fn test_breaks_cycles_in_input_graph() {
     let c = g.add_node(NodeLabel::default());
     let d = g.add_node(NodeLabel::default());
     
-    g.add_edge(Edge::new(a, b), EdgeLabel::default());
-    g.add_edge(Edge::new(b, c), EdgeLabel::default());
-    g.add_edge(Edge::new(c, d), EdgeLabel::default());
-    g.add_edge(Edge::new(d, a), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, b), EdgeLabel::default());
+    g.add_edge(g.create_edge(b, c), EdgeLabel::default());
+    g.add_edge(g.create_edge(c, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(d, a), EdgeLabel::default());
     
     Acyclic::run(&mut g);
     
@@ -116,8 +116,8 @@ fn test_creates_multi_edge_where_necessary() {
     let a = g.add_node(NodeLabel::default());
     let b = g.add_node(NodeLabel::default());
     
-    g.add_edge(Edge::new(a, b), EdgeLabel::default());
-    g.add_edge(Edge::new(b, a), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, b), EdgeLabel::default());
+    g.add_edge(g.create_edge(b, a), EdgeLabel::default());
     
     Acyclic::run(&mut g);
     
@@ -137,12 +137,12 @@ fn test_undo_does_not_change_edges_where_original_was_acyclic() {
     edge_label.minlen = 2;
     edge_label.weight = 3.0;
     
-    g.add_edge(Edge::new(a, b), edge_label.clone());
+    g.add_edge(g.create_edge(a, b), edge_label.clone());
     
     Acyclic::run(&mut g);
     Acyclic::undo(&mut g);
     
-    let retrieved_label = g.edge_label(&Edge::new(a, b));
+    let retrieved_label = g.edge_label(&g.create_query_edge(a, b));
     assert!(retrieved_label.is_some());
     let retrieved = retrieved_label.unwrap();
     assert_eq!(retrieved.minlen, 2);
@@ -165,14 +165,14 @@ fn test_undo_can_restore_previously_reversed_edges() {
     edge2_label.minlen = 3;
     edge2_label.weight = 4.0;
     
-    g.add_edge(Edge::new(a, b), edge1_label);
-    g.add_edge(Edge::new(b, a), edge2_label);
+    g.add_edge(g.create_edge(a, b), edge1_label);
+    g.add_edge(g.create_edge(b, a), edge2_label);
     
     Acyclic::run(&mut g);
     Acyclic::undo(&mut g);
     
-    let retrieved1 = g.edge_label(&Edge::new(a, b));
-    let retrieved2 = g.edge_label(&Edge::new(b, a));
+    let retrieved1 = g.edge_label(&g.create_query_edge(a, b));
+    let retrieved2 = g.edge_label(&g.create_query_edge(b, a));
     
     assert!(retrieved1.is_some());
     assert!(retrieved2.is_some());
@@ -203,10 +203,10 @@ fn test_greedy_prefers_to_break_cycles_at_low_weight_edges() {
     let mut low_weight_label = EdgeLabel::default();
     low_weight_label.weight = 1.0;
     
-    g.add_edge(Edge::new(a, b), default_label.clone());
-    g.add_edge(Edge::new(b, c), default_label.clone());
-    g.add_edge(Edge::new(c, d), low_weight_label);
-    g.add_edge(Edge::new(d, a), default_label);
+    g.add_edge(g.create_edge(a, b), default_label.clone());
+    g.add_edge(g.create_edge(b, c), default_label.clone());
+    g.add_edge(g.create_edge(c, d), low_weight_label);
+    g.add_edge(g.create_edge(d, a), default_label);
     
     Acyclic::run(&mut g);
     
@@ -214,7 +214,7 @@ fn test_greedy_prefers_to_break_cycles_at_low_weight_edges() {
     assert!(cycles.is_empty());
     
     // The low-weight edge (c, d) should be removed
-    assert!(!g.has_edge(&Edge::new(c, d)));
+    assert!(!g.has_edge(&g.create_query_edge(c, d)));
 }
 
 #[test]
@@ -227,10 +227,10 @@ fn test_unknown_acyclicer_still_works() {
     let c = g.add_node(NodeLabel::default());
     let d = g.add_node(NodeLabel::default());
     
-    g.add_edge(Edge::new(a, b), EdgeLabel::default());
-    g.add_edge(Edge::new(a, c), EdgeLabel::default());
-    g.add_edge(Edge::new(b, d), EdgeLabel::default());
-    g.add_edge(Edge::new(c, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, b), EdgeLabel::default());
+    g.add_edge(g.create_edge(a, c), EdgeLabel::default());
+    g.add_edge(g.create_edge(b, d), EdgeLabel::default());
+    g.add_edge(g.create_edge(c, d), EdgeLabel::default());
     
     Acyclic::run(&mut g);
     
