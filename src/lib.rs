@@ -4,6 +4,7 @@
 //! This library provides algorithms for laying out directed graphs with
 //! automatic node positioning and edge routing.
 
+pub mod acyclic;
 pub mod counters;
 pub mod graph;
 pub mod layout;
@@ -12,18 +13,6 @@ pub mod position;
 pub mod rank;
 pub mod types;
 pub mod util;
-
-#[cfg(test)]
-mod zero_difference_tests;
-
-#[cfg(test)]
-mod test_node_index_stability;
-
-#[cfg(test)]
-mod debug_petgraph;
-
-#[cfg(test)]
-mod test_petgraph_behavior;
 
 pub use graph::Graph;
 pub use layout::layout;

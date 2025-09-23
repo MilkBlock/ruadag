@@ -2,8 +2,8 @@
 //!
 //! 这个模块定义了 dagviz 中使用的核心类型，包括节点、边、配置等。
 
+use crate::graph::NodeIndex;
 use indexmap::IndexMap;
-use petgraph::graph::NodeIndex;
 
 /// 边类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -178,6 +178,8 @@ pub struct EdgeLabel {
     pub height: f64,
     /// 边是否被反转（用于无环化）
     pub reversed: Option<bool>,
+    /// 反转边的原始名称
+    pub forward_name: Option<String>,
     /// 边标签的偏移量
     pub labeloffset: f64,
     /// 边标签的位置
@@ -200,6 +202,7 @@ impl Default for EdgeLabel {
             width: 0.0,
             height: 0.0,
             reversed: None,
+            forward_name: None,
             labeloffset: 10.0,
             labelpos: LabelPosition::default(),
             custom: IndexMap::new(),
@@ -262,6 +265,8 @@ pub struct GraphConfig {
     pub ranker: Ranker,
     /// 排序方向
     pub rankdir: RankDirection,
+    /// 无环化算法
+    pub acyclicer: String,
     /// 图的最大层级
     pub max_rank: Option<i32>,
     /// 图的宽度
@@ -291,6 +296,7 @@ impl Default for GraphConfig {
             align: Align::Center,
             ranker: Ranker::default(),
             rankdir: RankDirection::default(),
+            acyclicer: "greedy".to_string(),
             max_rank: None,
             width: None,
             height: None,

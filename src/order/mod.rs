@@ -1,15 +1,20 @@
 //! 节点排序算法模块
 
+pub mod barycenter;
 pub mod build_layer_graph;
+pub mod constraint_graph;
 pub mod cross_count;
 pub mod init_order;
 pub mod sort_subgraph;
 
+use crate::LayoutOptions;
 use crate::counters::*;
 use crate::graph::Graph;
-use crate::util::{build_layer_matrix, max_rank, range, range_with_step, time};
-use crate::LayoutOptions;
-use petgraph::graph::NodeIndex;
+use crate::graph::NodeIndex;
+use crate::util::{build_layer_matrix, is_placeholder, max_rank, range, range_with_step, time};
+
+use build_layer_graph::{LayerGraph, build_layer_graph};
+use constraint_graph::{ConstraintGraph, add_subgraph_constraints};
 
 /// 为图中的节点分配顺序以最小化边交叉
 ///
@@ -18,28 +23,8 @@ pub fn order(graph: &mut Graph, opts: Option<&LayoutOptions>) {
     let default = LayoutOptions::default();
     let opts = opts.unwrap_or(&default);
 
-    // 构建层级信息
-    let mut layers = build_layers(graph);
-
-    // 检查是否有自定义排序函数
-    if let Some(custom_order) = &opts.custom.get("custom_order") {
-        // 调用自定义排序函数
-        if let Some(custom_fn) = custom_order.as_str() {
-            match custom_fn {
-                "custom_sort" => {
-                    // 执行自定义排序逻辑
-                    custom_sort_layers(graph, &mut layers);
-                }
-                _ => {
-                    // 默认排序
-                    default_sort_layers(graph, &mut layers);
-                }
-            }
-        }
-    } else {
-        // 使用默认排序
-        default_sort_layers(graph, &mut layers);
-    }
+    // 构建层级信息 - 与JS版本一致，不进行额外的默认排序
+    let _layers = build_layers(graph);
 
     let max_rank = max_rank(graph);
 
@@ -62,12 +47,14 @@ pub fn order(graph: &mut Graph, opts: Option<&LayoutOptions>) {
         return;
     }
 
-    // 优化排序以减少交叉
+    // 优化排序以减少交叉 - 与JS版本保持一致的动态停止机制
     let mut best_cc = usize::MAX;
     let mut best_layering = layering;
+    let mut last_best = 0;
 
-    for i in 0..4 {
-        let layer_graphs = if i % 2 == 0 {
+    for i in 0.. {
+        // 修复层级图选择逻辑，与JS版本一致
+        let layer_graphs = if i % 2 == 1 {
             &mut down_layer_graphs
         } else {
             &mut up_layer_graphs
@@ -83,8 +70,16 @@ pub fn order(graph: &mut Graph, opts: Option<&LayoutOptions>) {
         };
 
         if cc < best_cc {
+            last_best = 0; // 重置计数器，与JS版本一致
             best_cc = cc;
             best_layering = current_layering;
+        } else {
+            last_best += 1;
+        }
+
+        // 连续4次无改进则停止，与JS版本一致
+        if last_best >= 4 {
+            break;
         }
     }
 
@@ -93,27 +88,51 @@ pub fn order(graph: &mut Graph, opts: Option<&LayoutOptions>) {
 }
 
 /// 构建层级图
-fn build_layer_graphs(graph: &Graph, ranks: &[i32], relationship: &str) -> Vec<Graph> {
+fn build_layer_graphs(graph: &Graph, ranks: &[i32], relationship: &str) -> Vec<LayerGraph> {
     ranks
         .iter()
-        .map(|&rank| build_layer_graph::build_layer_graph(graph, rank, relationship))
+        .map(|&rank| build_layer_graph(graph, rank, relationship))
         .collect()
 }
 
 /// 扫描层级图
-fn sweep_layer_graphs(layer_graphs: &mut [Graph], bias_right: bool) {
-    for layer_graph in layer_graphs {
-        let root = find_root(layer_graph);
-        let sorted = sort_subgraph::sort_subgraph(layer_graph, root, bias_right);
+fn sweep_layer_graphs(layer_graphs: &mut [LayerGraph], bias_right: bool) {
+    let mut constraint_graph = ConstraintGraph::new();
 
-        // 分配顺序
-        for (i, node_id) in sorted.iter().enumerate() {
-            if let Some(label) = layer_graph.node_label_mut(*node_id) {
-                label.order = Some(i);
+    for layer_graph in layer_graphs {
+        // 跳过空的层级图
+        if layer_graph.graph.node_count() == 0 {
+            continue;
+        }
+
+        // 在层级图中找到根节点
+        let root = find_root(&layer_graph.graph);
+
+        // 在层级图中进行排序，传递约束图
+        let sort_result =
+            sort_subgraph::sort_subgraph(&layer_graph.graph, root, &constraint_graph, bias_right);
+
+        // 分配顺序到层级图
+        for (i, layer_node_id) in sort_result.vs.iter().enumerate() {
+            // 确保节点ID属于层级图
+            if layer_node_id.belongs_to_graph(layer_graph.graph.graph_id()) {
+                if let Some(label) = layer_graph.graph.node_label_mut(*layer_node_id) {
+                    label.order = Some(i);
+                }
+            } else {
+                panic!(
+                    "Layer node ID {:?} does not belong to layer graph {}\nLayer graph debug info: {}\nNode debug info: belongs_to_graph({}) = {}",
+                    layer_node_id,
+                    layer_graph.graph.graph_id(),
+                    layer_graph.graph.debug_info(),
+                    layer_graph.graph.graph_id(),
+                    layer_node_id.belongs_to_graph(layer_graph.graph.graph_id())
+                );
             }
         }
 
-        // 添加子图约束（暂时省略，功能已移除）
+        // 添加子图约束
+        add_subgraph_constraints(&layer_graph.graph, &mut constraint_graph, &sort_result.vs);
     }
 }
 
@@ -121,8 +140,15 @@ fn sweep_layer_graphs(layer_graphs: &mut [Graph], bias_right: bool) {
 fn assign_order(graph: &mut Graph, layering: &Vec<Vec<NodeIndex>>) {
     for layer in layering {
         for (i, node_id) in layer.iter().enumerate() {
-            if let Some(label) = graph.node_label_mut(*node_id) {
-                label.order = Some(i);
+            // 跳过占位符节点
+            if is_placeholder(*node_id) {
+                continue;
+            }
+            // 检查节点是否属于当前图
+            if node_id.belongs_to_graph(graph.graph_id()) {
+                if let Some(label) = graph.node_label_mut(*node_id) {
+                    label.order = Some(i);
+                }
             }
         }
     }
@@ -132,54 +158,18 @@ fn assign_order(graph: &mut Graph, layering: &Vec<Vec<NodeIndex>>) {
 fn find_root(graph: &Graph) -> NodeIndex {
     // 查找入度为0的节点作为根节点
     for node_id in graph.node_indices() {
-        let predecessors: Vec<NodeIndex> = graph.predecessors(node_id).collect();
-        if predecessors.is_empty() {
+        if graph.predecessors(node_id).into_iter().count() == 0 {
             return node_id;
         }
     }
 
     // 如果没有入度为0的节点，返回第一个节点
-    graph.node_indices().next().unwrap_or_default()
-}
-
-/// 默认排序层级
-fn default_sort_layers(graph: &mut Graph, layers: &mut Vec<Vec<NodeIndex>>) {
-    // 使用简单的拓扑排序
-    for layer in layers.iter_mut() {
-        layer.sort_by_key(|&node_id| {
-            graph
-                .node_label(node_id)
-                .and_then(|label| label.order)
-                .unwrap_or(0)
-        });
+    if let Some(first_node) = graph.node_indices().next() {
+        first_node
+    } else {
+        // 如果图是空的，这是一个错误情况
+        panic!("Cannot find root node in empty graph");
     }
-}
-
-/// 自定义排序层级
-fn custom_sort_layers(graph: &mut Graph, layers: &mut Vec<Vec<NodeIndex>>) {
-    // 使用更复杂的排序算法，比如基于交叉数的最小化
-    for layer in layers.iter_mut() {
-        // 这里可以实现更复杂的排序逻辑
-        // 比如基于边的交叉数进行排序
-        layer.sort_by_key(|&node_id| {
-            // 计算节点的权重进行排序
-            calculate_node_weight(graph, node_id)
-        });
-    }
-}
-
-/// 计算节点权重
-fn calculate_node_weight(graph: &Graph, node_id: NodeIndex) -> i32 {
-    let mut weight = 0;
-
-    // 基于连接数计算权重
-    let successors: Vec<NodeIndex> = graph.successors(node_id).collect();
-    weight += successors.len() as i32;
-
-    let predecessors: Vec<NodeIndex> = graph.predecessors(node_id).collect();
-    weight += predecessors.len() as i32;
-
-    weight
 }
 
 /// 构建层级信息

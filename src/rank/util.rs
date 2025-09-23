@@ -1,10 +1,10 @@
 //! 排名工具函数
 
 use crate::graph::Graph;
+use crate::graph::NodeIndex;
 use crate::types::*;
 use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::NodeIndex;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 /// 最长路径算法
 /// 基于 JavaScript 版本的实现，使用深度优先搜索
@@ -34,6 +34,27 @@ pub fn longest_path(graph: &mut Graph) {
     // 从每个源节点开始DFS
     for source in sources {
         dfs_rank(graph, source, &mut visited);
+    }
+
+    // 如果还有未访问的节点（可能形成环或孤立节点），也要处理它们
+    let unvisited_nodes: Vec<NodeIndex> = graph
+        .node_indices()
+        .filter(|&node_id| {
+            !visited.contains(&node_id) && {
+                if let Some(label) = graph.node_label(node_id) {
+                    label
+                        .dummy
+                        .as_ref()
+                        .map_or(true, |d| !matches!(d, Dummy::Edge))
+                } else {
+                    false
+                }
+            }
+        })
+        .collect();
+
+    for node_id in unvisited_nodes {
+        dfs_rank(graph, node_id, &mut visited);
     }
 }
 
@@ -93,11 +114,8 @@ fn dfs_rank(
     }
 
     println!(
-        "  dfs_rank: NodeIndex({}) -> rank={}, has_out_edges={}, min_rank={}",
-        node_id.index(),
-        rank,
-        has_out_edges,
-        min_rank
+        "  dfs_rank: NodeIndex({:?}) -> rank={}, has_out_edges={}, min_rank={}",
+        node_id, rank, has_out_edges, min_rank
     );
 
     rank
@@ -258,19 +276,26 @@ fn dfs2(
 /// 反转图
 fn reverse_graph(graph: &Graph) -> Graph {
     let mut reversed = Graph::new();
+    let mut node_mapping = std::collections::HashMap::new();
 
     // 添加所有节点
     for node_id in graph.node_indices() {
         if let Some(label) = graph.node_label(node_id) {
-            reversed.add_node(label.clone());
+            let new_node_id = reversed.add_node(label.clone());
+            node_mapping.insert(node_id, new_node_id);
         }
     }
 
     // 添加反转的边
     for edge in graph.edges() {
-        let reversed_edge = Edge::new(edge.target, edge.source);
-        if let Some(label) = graph.edge_label(&edge) {
-            let _ = reversed.add_edge(reversed_edge, label.clone());
+        if let (Some(&new_source), Some(&new_target)) = (
+            node_mapping.get(&edge.target),
+            node_mapping.get(&edge.source),
+        ) {
+            let reversed_edge = Edge::new(new_source, new_target);
+            if let Some(label) = graph.edge_label(&edge) {
+                let _ = reversed.add_edge(reversed_edge, label.clone());
+            }
         }
     }
 

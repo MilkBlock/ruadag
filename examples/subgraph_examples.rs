@@ -4,9 +4,9 @@
 //! 子图允许将节点组织成层次结构，这对于复杂的图形布局非常有用。
 
 use dagviz::graph::Graph;
+use dagviz::graph::NodeIndex;
 use dagviz::layout;
 use dagviz::types::*;
-use petgraph::graph::NodeIndex;
 
 /// 示例1：简单的父子关系
 ///
@@ -449,7 +449,15 @@ pub fn layered_architecture_example() -> Graph {
         ..Default::default()
     });
 
-    // 添加层间连接
+    // 添加层间连接 - 创建真正的分层结构
+    // 表示层 -> 业务逻辑层
+    let edge_presentation_business = Edge::new(presentation, business);
+    // 业务逻辑层 -> 数据访问层
+    let edge_business_data_access = Edge::new(business, data_access);
+    // 数据访问层 -> 数据存储层
+    let edge_data_access_storage = Edge::new(data_access, data_storage);
+
+    // 组件间的连接
     let edge_web_user = Edge::new(web_ui, user_service);
     let edge_mobile_order = Edge::new(mobile_ui, order_service);
     let edge_user_repo = Edge::new(user_service, user_repository);
@@ -457,12 +465,42 @@ pub fn layered_architecture_example() -> Graph {
     let edge_user_db = Edge::new(user_repository, user_db);
     let edge_order_db = Edge::new(order_repository, order_db);
 
+    // 添加层间边
+    graph.add_edge(edge_presentation_business, EdgeLabel::default());
+    graph.add_edge(edge_business_data_access, EdgeLabel::default());
+    graph.add_edge(edge_data_access_storage, EdgeLabel::default());
+
+    // 添加层与组件之间的连接
+    // 表示层组件连接到表示层
+    let edge_presentation_web = Edge::new(presentation, web_ui);
+    let edge_presentation_mobile = Edge::new(presentation, mobile_ui);
+    // 业务逻辑层组件连接到业务逻辑层
+    let edge_business_user = Edge::new(business, user_service);
+    let edge_business_order = Edge::new(business, order_service);
+    // 数据访问层组件连接到数据访问层
+    let edge_data_access_user_repo = Edge::new(data_access, user_repository);
+    let edge_data_access_order_repo = Edge::new(data_access, order_repository);
+    // 数据存储层组件连接到数据存储层
+    let edge_storage_user_db = Edge::new(data_storage, user_db);
+    let edge_storage_order_db = Edge::new(data_storage, order_db);
+
+    // 添加组件间边
     graph.add_edge(edge_web_user, EdgeLabel::default());
     graph.add_edge(edge_mobile_order, EdgeLabel::default());
     graph.add_edge(edge_user_repo, EdgeLabel::default());
     graph.add_edge(edge_order_repo, EdgeLabel::default());
     graph.add_edge(edge_user_db, EdgeLabel::default());
     graph.add_edge(edge_order_db, EdgeLabel::default());
+
+    // 添加层与组件的连接
+    graph.add_edge(edge_presentation_web, EdgeLabel::default());
+    graph.add_edge(edge_presentation_mobile, EdgeLabel::default());
+    graph.add_edge(edge_business_user, EdgeLabel::default());
+    graph.add_edge(edge_business_order, EdgeLabel::default());
+    graph.add_edge(edge_data_access_user_repo, EdgeLabel::default());
+    graph.add_edge(edge_data_access_order_repo, EdgeLabel::default());
+    graph.add_edge(edge_storage_user_db, EdgeLabel::default());
+    graph.add_edge(edge_storage_order_db, EdgeLabel::default());
 
     graph
 }

@@ -1,8 +1,9 @@
 //! 交叉计数算法
 
 use crate::graph::Graph;
+use crate::graph::NodeIndex;
+use crate::util::is_placeholder;
 use indexmap::IndexMap;
-use petgraph::graph::NodeIndex;
 
 /// 计算层级中的边交叉数
 pub fn cross_count(graph: &Graph, layering: &Vec<Vec<NodeIndex>>) -> usize {
@@ -26,48 +27,67 @@ fn count_crossings_between_layers(
     upper_layer: &[NodeIndex],
     lower_layer: &[NodeIndex],
 ) -> usize {
-    let mut crossings = 0;
-
     // 为每个节点分配位置索引
-    let upper_positions: IndexMap<NodeIndex, usize> = upper_layer
-        .iter()
-        .enumerate()
-        .map(|(i, &node)| (node, i))
-        .collect();
-
     let lower_positions: IndexMap<NodeIndex, usize> = lower_layer
         .iter()
         .enumerate()
         .map(|(i, &node)| (node, i))
         .collect();
 
-    // 收集所有边
-    let mut edges = Vec::new();
+    // 收集所有边及其权重
+    let mut south_entries = Vec::new();
 
     for &upper_node in upper_layer {
-        for &lower_node in lower_layer {
-            let edge = crate::types::Edge::new(upper_node, lower_node);
-            if graph.has_edge(&edge) {
-                if let (Some(&upper_pos), Some(&lower_pos)) = (
-                    upper_positions.get(&upper_node),
-                    lower_positions.get(&lower_node),
-                ) {
-                    edges.push((upper_pos, lower_pos));
-                }
+        // 跳过占位符节点
+        if is_placeholder(upper_node) {
+            continue;
+        }
+        
+        for edge in graph.out_edges(upper_node) {
+            if let Some(&pos) = lower_positions.get(&edge.target) {
+                let weight = graph.edge_label(&edge)
+                    .map(|label| label.weight as usize)
+                    .unwrap_or(1);
+                south_entries.push((pos, weight));
             }
         }
     }
 
-    // 计算交叉数
-    for i in 0..edges.len() {
-        for j in (i + 1)..edges.len() {
-            if edges_cross(&edges[i], &edges[j]) {
-                crossings += 1;
-            }
+    // 按位置排序
+    south_entries.sort_by_key(|&(pos, _)| pos);
+
+    // 构建累加器树
+    let first_index = if lower_layer.is_empty() {
+        1
+    } else {
+        let mut fi = 1;
+        while fi < lower_layer.len() {
+            fi <<= 1;
         }
+        fi
+    };
+    let tree_size = 2 * first_index - 1;
+    let first_index = first_index - 1;
+    let mut tree = vec![0; tree_size];
+
+    // 计算加权交叉数
+    let mut cc = 0;
+    for (pos, weight) in south_entries {
+        let mut index = pos + first_index;
+        tree[index] += weight;
+        let mut weight_sum = 0;
+        
+        while index > 0 {
+            if index % 2 == 1 {
+                weight_sum += tree[index + 1];
+            }
+            index = (index - 1) >> 1;
+            tree[index] += weight;
+        }
+        cc += weight * weight_sum;
     }
 
-    crossings
+    cc
 }
 
 /// 检查两条边是否交叉

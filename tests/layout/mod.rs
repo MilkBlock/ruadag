@@ -1,1 +1,3 @@
-// Layout tests module - tests will be added here
+// Layout tests module
+
+mod layout_tests;

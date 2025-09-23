@@ -19,6 +19,7 @@ pub fn feasible_tree(graph: &mut Graph) {
 /// 创建辅助图
 fn create_auxiliary_graph(graph: &Graph) -> Graph {
     let mut aux_graph = Graph::new();
+    let mut node_mapping = std::collections::HashMap::new();
 
     // 添加源节点和汇节点
     let _source = "source".to_string();
@@ -29,16 +30,17 @@ fn create_auxiliary_graph(graph: &Graph) -> Graph {
 
     // 添加所有原始节点
     for node_id in graph.node_indices() {
-        aux_graph.add_node(NodeLabel::default());
+        let new_node_id = aux_graph.add_node(NodeLabel::default());
+        node_mapping.insert(node_id, new_node_id);
 
         // 从源节点到每个节点的边
-        let source_edge = Edge::new(source_node, node_id);
+        let source_edge = Edge::new(source_node, new_node_id);
         let mut source_label = EdgeLabel::default();
         source_label.weight = 1.0;
         let _ = aux_graph.add_edge(source_edge, source_label);
 
         // 从每个节点到汇节点的边
-        let sink_edge = Edge::new(node_id, sink_node);
+        let sink_edge = Edge::new(new_node_id, sink_node);
         let mut sink_label = EdgeLabel::default();
         sink_label.weight = 1.0;
         let _ = aux_graph.add_edge(sink_edge, sink_label);
@@ -46,12 +48,18 @@ fn create_auxiliary_graph(graph: &Graph) -> Graph {
 
     // 添加原始图中的边
     for edge in graph.edges() {
-        let mut edge_label = EdgeLabel::default();
-        if let Some(original_label) = graph.edge_label(&edge) {
-            edge_label.minlen = original_label.minlen;
-            edge_label.weight = original_label.weight;
+        if let (Some(&new_source), Some(&new_target)) = (
+            node_mapping.get(&edge.source),
+            node_mapping.get(&edge.target)
+        ) {
+            let mut edge_label = EdgeLabel::default();
+            if let Some(original_label) = graph.edge_label(&edge) {
+                edge_label.minlen = original_label.minlen;
+                edge_label.weight = original_label.weight;
+            }
+            let new_edge = Edge::new(new_source, new_target);
+            let _ = aux_graph.add_edge(new_edge, edge_label);
         }
-        let _ = aux_graph.add_edge(edge, edge_label);
     }
 
     aux_graph

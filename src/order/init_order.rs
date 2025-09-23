@@ -1,25 +1,80 @@
 //! 初始化排序算法
 use crate::graph::Graph;
-use crate::util::build_layer_matrix;
-use petgraph::graph::NodeIndex;
+use crate::graph::NodeIndex;
+use crate::util::{build_layer_matrix, is_placeholder};
 
 /// 初始化节点排序
+/// 对应 JS 函数: initOrder() in lib/order/init-order.js
 pub fn init_order(graph: &Graph) -> Vec<Vec<NodeIndex>> {
-    let mut layering = build_layer_matrix(graph);
+    let mut visited = std::collections::HashSet::new();
 
-    // 对每一层进行排序
-    for layer in layering.iter_mut() {
-        // 使用启发式排序
-        layer.sort_by(|a, b| {
-            // 按入度排序，入度小的在前
-            let a_in_degree = graph.in_edges(*a).len();
-            let b_in_degree = graph.in_edges(*b).len();
+    // 获取简单节点（无子节点的节点）
+    let simple_nodes: Vec<NodeIndex> = graph
+        .node_indices()
+        .filter(|&_node_id| {
+            // 检查是否有子节点（在dagre中，子节点通常表示复合节点）
+            // 这里我们假设所有节点都是简单节点，因为我们的Graph结构可能不同
+            true
+        })
+        .collect();
 
-            a_in_degree.cmp(&b_in_degree)
-        });
+    // 获取简单节点的rank并找到最大rank
+    let simple_nodes_ranks: Vec<i32> = simple_nodes
+        .iter()
+        .filter_map(|&node_id| graph.node_label(node_id)?.rank)
+        .collect();
+
+    let max_rank = simple_nodes_ranks.iter().max().copied().unwrap_or(0);
+
+    // 创建层级数组
+    let mut layers: Vec<Vec<NodeIndex>> = (0..=max_rank).map(|_| Vec::new()).collect();
+
+    // DFS函数
+    fn dfs(
+        graph: &Graph,
+        node_id: NodeIndex,
+        visited: &mut std::collections::HashSet<NodeIndex>,
+        layers: &mut Vec<Vec<NodeIndex>>,
+    ) {
+        if visited.contains(&node_id) {
+            return;
+        }
+        visited.insert(node_id);
+
+        if let Some(node_label) = graph.node_label(node_id) {
+            if let Some(rank) = node_label.rank {
+                if rank >= 0 && (rank as usize) < layers.len() {
+                    layers[rank as usize].push(node_id);
+                }
+            }
+        }
+
+        // 遍历后继节点
+        for successor in graph.successors(node_id) {
+            dfs(graph, successor, visited, layers);
+        }
     }
 
-    layering
+    // 按rank排序简单节点
+    let mut ordered_nodes = simple_nodes;
+    ordered_nodes.sort_by(|a, b| {
+        let rank_a = graph
+            .node_label(*a)
+            .and_then(|label| label.rank)
+            .unwrap_or(0);
+        let rank_b = graph
+            .node_label(*b)
+            .and_then(|label| label.rank)
+            .unwrap_or(0);
+        rank_a.cmp(&rank_b)
+    });
+
+    // 对每个排序后的节点执行DFS
+    for node_id in ordered_nodes {
+        dfs(graph, node_id, &mut visited, &mut layers);
+    }
+
+    layers
 }
 
 /// 使用随机排序初始化
@@ -34,8 +89,8 @@ pub fn init_order_random(graph: &Graph) -> Vec<Vec<NodeIndex>> {
         layer.sort_by(|a, b| {
             let mut hasher_a = DefaultHasher::new();
             let mut hasher_b = DefaultHasher::new();
-            a.index().hash(&mut hasher_a);
-            b.index().hash(&mut hasher_b);
+            a.hash(&mut hasher_a);
+            b.hash(&mut hasher_b);
             hasher_a.finish().cmp(&hasher_b.finish())
         });
     }
@@ -50,6 +105,14 @@ pub fn init_order_by_degree(graph: &Graph) -> Vec<Vec<NodeIndex>> {
     // 对每一层按度数排序
     for layer in layering.iter_mut() {
         layer.sort_by(|a, b| {
+            // 跳过占位符节点
+            if is_placeholder(*a) || is_placeholder(*b) {
+                return std::cmp::Ordering::Equal;
+            }
+            // 检查节点是否属于当前图
+            if !a.belongs_to_graph(graph.graph_id()) || !b.belongs_to_graph(graph.graph_id()) {
+                return std::cmp::Ordering::Equal;
+            }
             let a_degree = graph.in_edges(*a).len() + graph.out_edges(*a).len();
             let b_degree = graph.in_edges(*b).len() + graph.out_edges(*b).len();
 
@@ -68,6 +131,14 @@ pub fn init_order_by_weight(graph: &Graph) -> Vec<Vec<NodeIndex>> {
     // 对每一层按边权重排序
     for layer in layering.iter_mut() {
         layer.sort_by(|a, b| {
+            // 跳过占位符节点
+            if is_placeholder(*a) || is_placeholder(*b) {
+                return std::cmp::Ordering::Equal;
+            }
+            // 检查节点是否属于当前图
+            if !a.belongs_to_graph(graph.graph_id()) || !b.belongs_to_graph(graph.graph_id()) {
+                return std::cmp::Ordering::Equal;
+            }
             let a_weight = calculate_node_weight(graph, *a);
             let b_weight = calculate_node_weight(graph, *b);
 
@@ -82,6 +153,22 @@ pub fn init_order_by_weight(graph: &Graph) -> Vec<Vec<NodeIndex>> {
 
 /// 计算节点权重
 fn calculate_node_weight(graph: &Graph, node_id: NodeIndex) -> f64 {
+    // 跳过占位符节点
+    if is_placeholder(node_id) {
+        return 0.0;
+    }
+    // 检查节点是否属于当前图
+    if !node_id.belongs_to_graph(graph.graph_id()) {
+        panic!(
+            "Node {:?} does not belong to graph {}\nGraph debug info: {}\nNode debug info: belongs_to_graph({}) = {}",
+            node_id,
+            graph.graph_id(),
+            graph.debug_info(),
+            graph.graph_id(),
+            node_id.belongs_to_graph(graph.graph_id())
+        );
+    }
+
     let mut weight = 0.0;
 
     // 计算入边权重

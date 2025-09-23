@@ -1,3 +1,3 @@
-mod order_tests;
-
-// Tests are available through the order_tests module
+pub mod cross_count_tests;
+pub mod order_tests;
+pub mod sort_subgraph_tests;

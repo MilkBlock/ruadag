@@ -1,10 +1,19 @@
 //! 工具函数
 
 use crate::graph::Graph;
+use crate::graph::NodeIndex;
 use crate::types::*;
 use indexmap::IndexMap;
-use petgraph::graph::NodeIndex;
 use std::str::FromStr;
+use std::u32;
+
+/// 检查节点是否为占位符
+///
+/// 在 JavaScript 版本中，占位符通过 `dummy` 属性识别
+/// 在 Rust 版本中，我们使用特殊的图ID (0) 来标识占位符
+pub fn is_placeholder(node_id: NodeIndex) -> bool {
+    node_id.which_graph == u32::MAX
+}
 
 /// 构建层级矩阵
 /// 返回 Vec<Vec<NodeIndex>>，其中索引是 rank
@@ -25,8 +34,11 @@ pub fn build_layer_matrix(graph: &Graph) -> Vec<Vec<NodeIndex>> {
                     if let Some(order) = label.order {
                         // 确保向量足够大
                         while layer.len() <= order as usize {
-                            layer.push(NodeIndex::new(usize::MAX)); // 使用无效的占位符
+                            // 创建占位符节点，使用特殊的图ID来标识占位符
+                            let placeholder = NodeIndex::new_raw(usize::MAX, u32::MAX);
+                            layer.push(placeholder);
                         }
+                        // 使用原始节点ID，但确保它属于正确的图
                         layer[order as usize] = node_id;
                     } else {
                         // 如果没有 order，直接 push
@@ -39,7 +51,7 @@ pub fn build_layer_matrix(graph: &Graph) -> Vec<Vec<NodeIndex>> {
 
     // 清理占位符并保持顺序
     for layer in layering.iter_mut() {
-        layer.retain(|&node_id| node_id != NodeIndex::new(usize::MAX));
+        layer.retain(|&node_id| !is_placeholder(node_id));
     }
 
     layering

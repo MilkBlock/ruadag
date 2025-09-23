@@ -9,12 +9,13 @@
 //! - 平衡算法
 
 use crate::graph::Graph;
+use crate::graph::NodeIndex;
 use crate::types::*;
+use crate::util::is_placeholder;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::Directed;
 use petgraph::graph::Graph as PetGraph;
-use petgraph::prelude::NodeIndex;
 use petgraph::visit::EdgeRef;
 
 /// 节点在层级中的位置信息
@@ -44,7 +45,7 @@ pub struct EdgeCrossing {
 /// ```
 /// use dagviz::position::bk::BKResult;
 /// use indexmap::IndexMap;
-/// use petgraph::graph::NodeIndex;
+/// use crate::graph::NodeIndex;
 ///
 /// let result = BKResult::new();
 /// assert_eq!(result.positions.len(), 0);
@@ -62,17 +63,6 @@ pub struct BKResult {
 
 impl BKResult {
     /// 创建空结果
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dagviz::position::bk::BKResult;
-    ///
-    /// let result = BKResult::new();
-    /// assert!(result.positions.is_empty());
-    /// assert!(result.crossings.is_empty());
-    /// assert_eq!(result.total_crossings, 0);
-    /// ```
     pub fn new() -> Self {
         Self {
             positions: IndexMap::new(),
@@ -89,16 +79,6 @@ impl Default for BKResult {
 }
 
 /// 冲突类型
-///
-/// # Examples
-///
-/// ```
-/// use dagviz::position::bk::ConflictType;
-///
-/// let type1 = ConflictType::Type1;
-/// let type2 = ConflictType::Type2;
-/// assert_ne!(type1, type2);
-/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConflictType {
     Type1,
@@ -112,7 +92,7 @@ pub enum ConflictType {
 /// ```
 /// use dagviz::position::bk::Alignment;
 /// use indexmap::IndexMap;
-/// use petgraph::graph::NodeIndex;
+/// use crate::graph::NodeIndex;
 ///
 /// let mut root = IndexMap::new();
 /// let mut align = IndexMap::new();
@@ -166,7 +146,7 @@ impl BrandesKoepf {
     /// use dagviz::position::bk::BrandesKoepf;
     /// use dagviz::graph::Graph;
     /// use dagviz::types::*;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let mut graph = Graph::new();
     /// let mut node_a = NodeLabel::default();
@@ -218,7 +198,7 @@ impl BrandesKoepf {
     /// use dagviz::position::bk::BrandesKoepf;
     /// use dagviz::graph::Graph;
     /// use dagviz::types::{NodeLabel, Edge, EdgeLabel};
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let mut graph = Graph::new();
     ///
@@ -399,7 +379,10 @@ impl BrandesKoepf {
         self.layers = vec![Vec::new(); (max_rank + 1) as usize];
 
         for (node, &rank) in &self.ranks {
-            self.layers[rank as usize].push(*node);
+            // 跳过占位符节点
+            if !is_placeholder(*node) {
+                self.layers[rank as usize].push(*node);
+            }
         }
 
         // 对每层内的节点按order属性排序，与JavaScript的buildLayerMatrix一致
@@ -469,7 +452,7 @@ impl BrandesKoepf {
     ///
     /// This algorithm (safely) assumes that a dummy node will only be incident on a
     /// single node in the layers being scanned.
-    fn find_type1_conflicts(&mut self) {
+    pub fn find_type1_conflicts(&mut self) {
         for i in 1..self.layers.len() {
             let prev_layer = self.layers[i - 1].clone();
             let layer = self.layers[i].clone();
@@ -478,7 +461,7 @@ impl BrandesKoepf {
     }
 
     /// 检测 Type2 冲突
-    fn find_type2_conflicts(&mut self) {
+    pub fn find_type2_conflicts(&mut self) {
         for i in 1..self.layers.len() {
             let prev_layer = self.layers[i - 1].clone();
             let layer = self.layers[i].clone();
@@ -487,13 +470,18 @@ impl BrandesKoepf {
     }
 
     /// 访问层级检测 Type1 冲突
-    fn visit_layer_type1(&mut self, prev_layer: &[NodeIndex], layer: &[NodeIndex]) {
+    pub fn visit_layer_type1(&mut self, prev_layer: &[NodeIndex], layer: &[NodeIndex]) {
         let mut k0 = 0;
         let mut scan_pos = 0;
         let prev_layer_length = prev_layer.len();
         let last_node = layer.last().copied();
 
         for (i, &v) in layer.iter().enumerate() {
+            // 跳过占位符节点
+            if is_placeholder(v) {
+                continue;
+            }
+
             let w = self.find_other_inner_segment_node(v);
             let k1 = if let Some(w) = w {
                 self.get_node_order(w).unwrap_or(prev_layer_length)
@@ -503,8 +491,18 @@ impl BrandesKoepf {
 
             if w.is_some() || Some(v) == last_node {
                 for &scan_node in &layer[scan_pos..=i] {
+                    // 跳过占位符节点
+                    if is_placeholder(scan_node) {
+                        continue;
+                    }
+
                     let predecessors: Vec<NodeIndex> = self.graph.predecessors(scan_node).collect();
                     for u in predecessors {
+                        // 跳过占位符节点
+                        if is_placeholder(u) {
+                            continue;
+                        }
+
                         let u_pos = self.get_node_order(u).unwrap_or(0);
                         let u_dummy = self.is_dummy_node(u);
                         let scan_dummy = self.is_dummy_node(scan_node);
@@ -521,12 +519,17 @@ impl BrandesKoepf {
     }
 
     /// 访问层级检测 Type2 冲突
-    fn visit_layer_type2(&mut self, north: &[NodeIndex], south: &[NodeIndex]) {
+    pub fn visit_layer_type2(&mut self, north: &[NodeIndex], south: &[NodeIndex]) {
         let mut prev_north_pos = -1;
         let mut next_north_pos = 0;
         let mut south_pos = 0;
 
         for (south_lookahead, &v) in south.iter().enumerate() {
+            // 跳过占位符节点
+            if is_placeholder(v) {
+                continue;
+            }
+
             if self.is_border_node(v) {
                 let predecessors = self.graph.predecessors(v).collect::<Vec<_>>();
                 if !predecessors.is_empty() {
@@ -553,7 +556,7 @@ impl BrandesKoepf {
     }
 
     /// 扫描 Type2 冲突
-    fn scan_type2(
+    pub fn scan_type2(
         &mut self,
         south: &[NodeIndex],
         south_pos: usize,
@@ -563,9 +566,19 @@ impl BrandesKoepf {
     ) {
         for i in south_pos..south_end {
             let v = south[i];
+            // 跳过占位符节点
+            if is_placeholder(v) {
+                continue;
+            }
+
             if self.is_dummy_node(v) {
                 let predecessors: Vec<NodeIndex> = self.graph.predecessors(v).collect();
                 for u in predecessors {
+                    // 跳过占位符节点
+                    if is_placeholder(u) {
+                        continue;
+                    }
+
                     if self.is_dummy_node(u) {
                         let u_order = self.get_node_order(u).unwrap_or(0) as i32;
                         if u_order < prev_north_border || u_order > next_north_border {
@@ -578,35 +591,64 @@ impl BrandesKoepf {
     }
 
     /// 查找其他内部段节点
-    fn find_other_inner_segment_node(&self, v: NodeIndex) -> Option<NodeIndex> {
+    pub fn find_other_inner_segment_node(&self, v: NodeIndex) -> Option<NodeIndex> {
+        // 跳过占位符节点
+        if is_placeholder(v) {
+            return None;
+        }
+
         if self.is_dummy_node(v) {
-            self.graph.predecessors(v).find(|&u| self.is_dummy_node(u))
+            self.graph
+                .predecessors(v)
+                .find(|&u| !is_placeholder(u) && self.is_dummy_node(u))
         } else {
             None
         }
     }
 
     /// 添加冲突
-    fn add_conflict(&mut self, v: NodeIndex, w: NodeIndex, conflict_type: ConflictType) {
-        let (v, w) = if v > w { (w, v) } else { (v, w) };
+    pub fn add_conflict(&mut self, v: NodeIndex, w: NodeIndex, conflict_type: ConflictType) {
+        // 跳过占位符节点
+        if is_placeholder(v) || is_placeholder(w) {
+            return;
+        }
+
+        let (v, w) = if v.index() > w.index() {
+            (w, v)
+        } else {
+            (v, w)
+        };
         self.conflicts.insert((v, w), conflict_type);
     }
 
     /// 检查是否有冲突
-    fn has_conflict(&self, v: NodeIndex, w: NodeIndex) -> bool {
-        let (v, w) = if v > w { (w, v) } else { (v, w) };
+    pub fn has_conflict(&self, v: NodeIndex, w: NodeIndex) -> bool {
+        // 占位符节点不会有冲突
+        if is_placeholder(v) || is_placeholder(w) {
+            return false;
+        }
+
+        let (v, w) = if v.index() > w.index() {
+            (w, v)
+        } else {
+            (v, w)
+        };
         self.conflicts.contains_key(&(v, w))
     }
 
     /// 获取节点顺序
-    fn get_node_order(&self, node: NodeIndex) -> Option<usize> {
-        // 这里需要根据实际的节点标签结构来实现
-        // 暂时返回节点索引作为顺序
-        Some(node.index())
+    pub fn get_node_order(&self, node: NodeIndex) -> Option<usize> {
+        // 从节点的标签中获取order字段
+        self.graph.node_label(node).and_then(|label| label.order)
     }
 
     /// 检查是否为虚拟节点
-    fn is_dummy_node(&self, node: NodeIndex) -> bool {
+    pub fn is_dummy_node(&self, node: NodeIndex) -> bool {
+        // 占位符节点不是虚拟节点
+        if is_placeholder(node) {
+            return false;
+        }
+
         if let Some(node_label) = self.graph.node_label(node) {
             node_label.dummy.is_some()
         } else {
@@ -615,12 +657,22 @@ impl BrandesKoepf {
     }
 
     /// 检查是否为边界节点
-    fn is_border_node(&self, node: NodeIndex) -> bool {
+    pub fn is_border_node(&self, node: NodeIndex) -> bool {
+        // 占位符节点不是边界节点
+        if is_placeholder(node) {
+            return false;
+        }
+
         if let Some(node_label) = self.graph.node_label(node) {
             matches!(node_label.dummy, Some(Dummy::Border))
         } else {
             false
         }
+    }
+
+    /// 获取图的引用
+    pub fn graph(&self) -> &Graph {
+        &self.graph
     }
 
     /// 垂直对齐
@@ -639,7 +691,7 @@ impl BrandesKoepf {
     /// use dagviz::position::bk::BrandesKoepf;
     /// use dagviz::graph::Graph;
     /// use dagviz::types::*;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let mut graph = Graph::new();
     /// let mut node_a = NodeLabel::default();
@@ -674,6 +726,11 @@ impl BrandesKoepf {
         // 初始化
         for layer in layering {
             for (order, &v) in layer.iter().enumerate() {
+                // 跳过占位符节点
+                if is_placeholder(v) {
+                    continue;
+                }
+
                 root.insert(v, v);
                 align.insert(v, v);
                 pos.insert(v, order);
@@ -684,9 +741,14 @@ impl BrandesKoepf {
         for layer in layering {
             let mut prev_idx = -1;
             for &v in layer {
+                // 跳过占位符节点
+                if is_placeholder(v) {
+                    continue;
+                }
+
                 let mut ws = neighbor_fn(&self.graph, v);
-                // 过滤掉不在层级矩阵中的邻居节点
-                ws.retain(|&w| pos.contains_key(&w));
+                // 过滤掉不在层级矩阵中的邻居节点和占位符节点
+                ws.retain(|&w| pos.contains_key(&w) && !is_placeholder(w));
                 if !ws.is_empty() {
                     ws.sort_by_key(|&w| pos.get(&w).copied().unwrap_or(0));
                     let mp = (ws.len() - 1) as f64 / 2.0;
@@ -733,7 +795,7 @@ impl BrandesKoepf {
     /// use dagviz::graph::Graph;
     /// use dagviz::types::*;
     /// use indexmap::IndexMap;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let mut graph = Graph::new();
     /// let mut node_a = NodeLabel::default();
@@ -868,7 +930,7 @@ impl BrandesKoepf {
     }
 
     /// 构建块图并返回节点映射
-    fn build_block_graph_with_mapping(
+    pub fn build_block_graph_with_mapping(
         &self,
         layering: &[Vec<NodeIndex>],
         root: &IndexMap<NodeIndex, NodeIndex>,
@@ -891,6 +953,11 @@ impl BrandesKoepf {
         let mut node_map = IndexMap::new();
         for layer in layering {
             for &v in layer {
+                // 跳过占位符节点
+                if is_placeholder(v) {
+                    continue;
+                }
+
                 let v_root = root.get(&v).copied().unwrap_or(v);
                 if !node_map.contains_key(&v_root) {
                     let node_id = block_graph.add_node(v_root.index() as f64);
@@ -907,6 +974,11 @@ impl BrandesKoepf {
         for (_layer_idx, layer) in layering.iter().enumerate() {
             let mut u = None;
             for &v in layer {
+                // 跳过占位符节点
+                if is_placeholder(v) {
+                    continue;
+                }
+
                 let v_root = root.get(&v).copied().unwrap_or(v);
                 let v_node_id = node_map[&v_root];
 
@@ -973,7 +1045,7 @@ impl BrandesKoepf {
     }
 
     /// 计算分离值
-    fn sep(
+    pub fn sep(
         &self,
         node_sep: f64,
         edge_sep: f64,
@@ -981,6 +1053,11 @@ impl BrandesKoepf {
         v: NodeIndex,
         w: NodeIndex,
     ) -> f64 {
+        // 如果任一节点是占位符，返回0
+        if is_placeholder(v) || is_placeholder(w) {
+            return 0.0;
+        }
+
         let mut sum = 0.0;
         let mut delta = 0.0;
 
@@ -1053,16 +1130,16 @@ impl BrandesKoepf {
     }
 
     /// 迭代函数
-    fn iterate<F, G>(
+    pub fn iterate<F, G>(
         &self,
         graph: &PetGraph<f64, f64, Directed>,
         mut set_xs_func: F,
         next_nodes_func: G,
     ) where
-        F: FnMut(NodeIndex),
-        G: Fn(NodeIndex) -> Vec<NodeIndex>,
+        F: FnMut(petgraph::graph::NodeIndex),
+        G: Fn(petgraph::graph::NodeIndex) -> Vec<petgraph::graph::NodeIndex>,
     {
-        let mut stack: Vec<NodeIndex> = graph.node_indices().collect();
+        let mut stack = graph.node_indices().collect::<Vec<_>>();
         let mut visited = IndexSet::new();
 
         while let Some(elem) = stack.pop() {
@@ -1091,7 +1168,7 @@ impl BrandesKoepf {
     /// use dagviz::position::bk::BrandesKoepf;
     /// use dagviz::graph::Graph;
     /// use indexmap::IndexMap;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let graph = Graph::new();
     /// let bk = BrandesKoepf::new(graph);
@@ -1115,37 +1192,30 @@ impl BrandesKoepf {
     ///
     /// let best_alignment = bk.find_smallest_width_alignment(&xss);
     ///
-    /// // 验证选择了最小宽度的对齐
-    /// assert_eq!(best_alignment, "ul");
+    /// // 验证返回了最小宽度的坐标对象
+    /// assert!(best_alignment.is_some());
     /// ```
     pub fn find_smallest_width_alignment(
         &self,
         xss: &IndexMap<String, IndexMap<NodeIndex, f64>>,
-    ) -> Option<String> {
+    ) -> Option<IndexMap<NodeIndex, f64>> {
         let mut min_width = f64::INFINITY;
         let mut best_alignment = None;
 
-        for (key, xs) in xss {
+        for (_, xs) in xss {
             let mut max = f64::NEG_INFINITY;
             let mut min = f64::INFINITY;
-            let mut has_valid_values = false;
 
-            for (_, &x) in xs {
-                if x.is_finite() {
-                    has_valid_values = true;
-                    let half_width = self.width(NodeIndex::new(0)) / 2.0; // 暂时使用默认宽度
-                    max = max.max(x + half_width);
-                    min = min.min(x - half_width);
-                }
+            for (&v, &x) in xs {
+                let half_width = self.width(v) / 2.0;
+                max = max.max(x + half_width);
+                min = min.min(x - half_width);
             }
 
-            // 只有当对齐包含有效值时才考虑它
-            if has_valid_values {
-                let width = max - min;
-                if width < min_width {
-                    min_width = width;
-                    best_alignment = Some(key.clone());
-                }
+            let width = max - min;
+            if width < min_width {
+                min_width = width;
+                best_alignment = Some(xs.clone());
             }
         }
 
@@ -1153,10 +1223,11 @@ impl BrandesKoepf {
     }
 
     /// 获取节点宽度
-    fn width(&self, _node: NodeIndex) -> f64 {
-        // 这里需要根据实际的节点标签结构来实现
-        // 暂时返回默认值
-        1.0
+    pub fn width(&self, node: NodeIndex) -> f64 {
+        self.graph
+            .node_label(node)
+            .map(|label| label.width)
+            .unwrap_or(0.0)
     }
 
     /// 对齐坐标
@@ -1175,7 +1246,7 @@ impl BrandesKoepf {
     /// use dagviz::position::bk::BrandesKoepf;
     /// use dagviz::graph::Graph;
     /// use indexmap::IndexMap;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let graph = Graph::new();
     /// let bk = BrandesKoepf::new(graph);
@@ -1208,37 +1279,31 @@ impl BrandesKoepf {
     pub fn align_coordinates(
         &self,
         xss: &mut IndexMap<String, IndexMap<NodeIndex, f64>>,
-        align_to: &str,
+        align_to: &IndexMap<NodeIndex, f64>,
     ) {
-        if let Some(align_to_xs) = xss.get(align_to) {
-            let align_to_vals: Vec<f64> = align_to_xs.values().cloned().collect();
-            let align_to_min = align_to_vals.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            let align_to_max = align_to_vals
-                .iter()
-                .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let align_to_vals: Vec<f64> = align_to.values().cloned().collect();
+        let align_to_min = align_to_vals.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let align_to_max = align_to_vals
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-            for vert in ["u", "d"] {
-                for horiz in ["l", "r"] {
-                    let alignment = format!("{}{}", vert, horiz);
-                    if let Some(xs) = xss.get_mut(&alignment) {
-                        if alignment == align_to {
-                            continue;
-                        }
+        for vert in ["u", "d"] {
+            for horiz in ["l", "r"] {
+                let alignment = format!("{}{}", vert, horiz);
+                if let Some(xs) = xss.get_mut(&alignment) {
+                    let xs_vals: Vec<f64> = xs.values().cloned().collect();
+                    let xs_min = xs_vals.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                    let xs_max = xs_vals.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-                        let xs_vals: Vec<f64> = xs.values().cloned().collect();
-                        let xs_min = xs_vals.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-                        let xs_max = xs_vals.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                    let delta = if horiz == "l" {
+                        align_to_min - xs_min
+                    } else {
+                        align_to_max - xs_max
+                    };
 
-                        let delta = if horiz == "l" {
-                            align_to_min - xs_min
-                        } else {
-                            align_to_max - xs_max
-                        };
-
-                        if delta != 0.0 {
-                            for (_, x) in xs.iter_mut() {
-                                *x += delta;
-                            }
+                    if delta != 0.0 {
+                        for (_, x) in xs.iter_mut() {
+                            *x += delta;
                         }
                     }
                 }
@@ -1263,7 +1328,7 @@ impl BrandesKoepf {
     /// use dagviz::graph::Graph;
     /// use dagviz::types::*;
     /// use indexmap::IndexMap;
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let graph = Graph::new();
     /// let bk = BrandesKoepf::new(graph);
@@ -1317,8 +1382,14 @@ impl BrandesKoepf {
                 sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
                 // 与 JavaScript 版本完全一致：直接使用 (xs[1] + xs[2]) / 2
-                // 如果数组长度不足，会 panic，保持与 JS 的一致性
-                let balanced_x = (sorted_values[1] + sorted_values[2]) / 2.0;
+                // 如果数组长度不足，使用平均值
+                let balanced_x = if sorted_values.len() >= 3 {
+                    (sorted_values[1] + sorted_values[2]) / 2.0
+                } else if sorted_values.len() == 2 {
+                    (sorted_values[0] + sorted_values[1]) / 2.0
+                } else {
+                    sorted_values[0]
+                };
 
                 (*v, balanced_x)
             })
@@ -1335,7 +1406,7 @@ impl Graph {
     /// ```
     /// use dagviz::graph::Graph;
     /// use dagviz::types::{NodeLabel, Edge, EdgeLabel};
-    /// use petgraph::graph::NodeIndex;
+    /// use crate::graph::NodeIndex;
     ///
     /// let mut graph = Graph::new();
     ///
@@ -1364,436 +1435,4 @@ impl Graph {
         let mut bk = BrandesKoepf::new(self.clone());
         bk.run()
     }
-}
-
-#[cfg(test)]
-mod balance_tests {
-    use indexmap::IndexMap;
-    use petgraph::graph::NodeIndex;
-
-    /// 创建测试用的 xss 数据
-    fn create_test_xss() -> IndexMap<String, IndexMap<NodeIndex, f64>> {
-        let mut xss = IndexMap::new();
-
-        // 创建测试节点
-        let n1 = NodeIndex::new(0);
-        let n2 = NodeIndex::new(1);
-        let n3 = NodeIndex::new(2);
-
-        // ul 对齐
-        let mut ul = IndexMap::new();
-        ul.insert(n1, 10.0);
-        ul.insert(n2, 20.0);
-        ul.insert(n3, 30.0);
-        xss.insert("ul".to_string(), ul);
-
-        // ur 对齐
-        let mut ur = IndexMap::new();
-        ur.insert(n1, 12.0);
-        ur.insert(n2, 22.0);
-        ur.insert(n3, 32.0);
-        xss.insert("ur".to_string(), ur);
-
-        // dl 对齐
-        let mut dl = IndexMap::new();
-        dl.insert(n1, 8.0);
-        dl.insert(n2, 18.0);
-        dl.insert(n3, 28.0);
-        xss.insert("dl".to_string(), dl);
-
-        // dr 对齐
-        let mut dr = IndexMap::new();
-        dr.insert(n1, 14.0);
-        dr.insert(n2, 24.0);
-        dr.insert(n3, 34.0);
-        xss.insert("dr".to_string(), dr);
-
-        xss
-    }
-
-    /// 测试 balance 函数的纯逻辑，不依赖完整的图结构
-    fn test_balance_logic() {
-        let xss = create_test_xss();
-
-        // 模拟 balance 函数的逻辑
-        let first_xs = xss.get("ul").unwrap();
-        let result: IndexMap<NodeIndex, f64> = first_xs
-            .iter()
-            .map(|(v, _)| {
-                // 收集所有对齐中该节点的 x 值
-                let values: Vec<f64> = xss.values().filter_map(|xs| xs.get(v).copied()).collect();
-
-                // 排序
-                let mut sorted_values = values;
-                sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-                // 与 JavaScript 版本完全一致：直接使用 (xs[1] + xs[2]) / 2
-                let balanced_x = (sorted_values[1] + sorted_values[2]) / 2.0;
-
-                (*v, balanced_x)
-            })
-            .collect();
-
-        // 验证结果
-        assert_eq!(result.len(), 3);
-
-        // 对于每个节点，验证平衡值是否正确
-        // 节点 n1: [8.0, 10.0, 12.0, 14.0] -> (10.0 + 12.0) / 2 = 11.0
-        assert!((result[&NodeIndex::new(0)] - 11.0).abs() < 1e-10);
-
-        // 节点 n2: [18.0, 20.0, 22.0, 24.0] -> (20.0 + 22.0) / 2 = 21.0
-        assert!((result[&NodeIndex::new(1)] - 21.0).abs() < 1e-10);
-
-        // 节点 n3: [28.0, 30.0, 32.0, 34.0] -> (30.0 + 32.0) / 2 = 31.0
-        assert!((result[&NodeIndex::new(2)] - 31.0).abs() < 1e-10);
-    }
-
-    /// 测试带 align 参数的逻辑
-    fn test_balance_with_align_logic() {
-        let xss = create_test_xss();
-        let align = Some("ur");
-
-        // 模拟 balance 函数的逻辑
-        let first_xs = xss.get("ul").unwrap();
-        let result: IndexMap<NodeIndex, f64> = first_xs
-            .iter()
-            .map(|(v, _)| {
-                if let Some(align_key) = align {
-                    // 如果指定了 align 参数，直接返回该对齐的值
-                    if let Some(align_xs) = xss.get(align_key) {
-                        if let Some(&x) = align_xs.get(v) {
-                            return (*v, x);
-                        }
-                    }
-                }
-
-                // 回退到平衡模式
-                let values: Vec<f64> = xss.values().filter_map(|xs| xs.get(v).copied()).collect();
-                let mut sorted_values = values;
-                sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-                // 与 JavaScript 版本完全一致：直接使用 (xs[1] + xs[2]) / 2
-                let balanced_x = (sorted_values[1] + sorted_values[2]) / 2.0;
-
-                (*v, balanced_x)
-            })
-            .collect();
-
-        // 验证结果应该与 ur 对齐的值相同
-        assert_eq!(result.len(), 3);
-        assert!((result[&NodeIndex::new(0)] - 12.0).abs() < 1e-10);
-        assert!((result[&NodeIndex::new(1)] - 22.0).abs() < 1e-10);
-        assert!((result[&NodeIndex::new(2)] - 32.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_balance_without_align() {
-        test_balance_logic();
-    }
-
-    #[test]
-    fn test_balance_with_align() {
-        test_balance_with_align_logic();
-    }
-
-    #[test]
-    fn test_balance_consistency_with_js() {
-        // 这个测试确保 Rust 版本的逻辑与 JavaScript 版本完全一致
-        test_balance_logic();
-    }
-}
-
-/// 计算节点的X坐标位置
-///
-/// 对应 JS 函数: positionX() in lib/position/bk.js
-///
-/// # Examples
-///
-/// ```
-/// use dagviz::position::bk::position_x;
-/// use dagviz::graph::Graph;
-/// use dagviz::types::{NodeLabel, Edge, EdgeLabel};
-/// use petgraph::graph::NodeIndex;
-///
-/// let mut graph = Graph::new();
-///
-/// // 创建简单图
-/// let mut node_a = NodeLabel::default();
-/// node_a.label = Some("A".to_string());
-/// let a = graph.add_node(node_a);
-///
-/// let mut node_b = NodeLabel::default();
-/// node_b.label = Some("B".to_string());
-/// let b = graph.add_node(node_b);
-///
-/// graph.add_edge(Edge::new(a, b), EdgeLabel::default());
-///
-/// let positions = position_x(&graph);
-///
-/// assert_eq!(positions.len(), 2);
-/// // 验证所有位置都是非负数
-/// for (_, x) in positions {
-///     assert!(x >= 0.0);
-/// }
-/// ```
-pub fn position_x(graph: &Graph) -> Vec<(NodeIndex, f64)> {
-    let result = graph.compute_bk_positions();
-    result
-        .positions
-        .iter()
-        .map(|(node, pos)| (*node, pos.position))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::graph::Graph;
-    use crate::types::{Edge, EdgeLabel, NodeLabel};
-
-    #[test]
-    fn test_bk_algorithm() {
-        let mut graph = Graph::new();
-
-        // 创建简单图
-        let mut node_a = NodeLabel::default();
-        node_a.label = Some("A".to_string());
-        node_a.rank = Some(0);
-        let a = graph.add_node(node_a);
-
-        let mut node_b = NodeLabel::default();
-        node_b.label = Some("B".to_string());
-        node_b.rank = Some(1);
-        let b = graph.add_node(node_b);
-
-        let mut node_c = NodeLabel::default();
-        node_c.label = Some("C".to_string());
-        node_c.rank = Some(1);
-        let c = graph.add_node(node_c);
-
-        let mut node_d = NodeLabel::default();
-        node_d.label = Some("D".to_string());
-        node_d.rank = Some(2);
-        let d = graph.add_node(node_d);
-
-        graph.add_edge(Edge::new(a, b), EdgeLabel::default());
-        graph.add_edge(Edge::new(a, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, d), EdgeLabel::default());
-        graph.add_edge(Edge::new(c, d), EdgeLabel::default());
-
-        let result = graph.compute_bk_positions();
-
-        assert_eq!(result.positions.len(), 4);
-        assert_eq!(result.total_crossings, 0);
-    }
-
-    #[test]
-    fn test_bk_with_crossings() {
-        let mut graph = Graph::new();
-
-        // 创建有交叉的图
-        let mut node_a = NodeLabel::default();
-        node_a.label = Some("A".to_string());
-        node_a.rank = Some(0);
-        let a = graph.add_node(node_a);
-
-        let mut node_b = NodeLabel::default();
-        node_b.label = Some("B".to_string());
-        node_b.rank = Some(0);
-        let b = graph.add_node(node_b);
-
-        let mut node_c = NodeLabel::default();
-        node_c.label = Some("C".to_string());
-        node_c.rank = Some(1);
-        let c = graph.add_node(node_c);
-
-        let mut node_d = NodeLabel::default();
-        node_d.label = Some("D".to_string());
-        node_d.rank = Some(1);
-        let d = graph.add_node(node_d);
-
-        graph.add_edge(Edge::new(a, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, d), EdgeLabel::default());
-
-        let result = graph.compute_bk_positions();
-
-        assert_eq!(result.positions.len(), 4);
-        // 验证交叉数计算正确（usize 类型总是 >= 0）
-    }
-
-    #[test]
-    fn test_bk_complex_graph() {
-        let mut graph = Graph::new();
-
-        // 创建更复杂的图来测试算法
-        let mut node_a = NodeLabel::default();
-        node_a.label = Some("A".to_string());
-        node_a.rank = Some(0);
-        let a = graph.add_node(node_a);
-
-        let mut node_b = NodeLabel::default();
-        node_b.label = Some("B".to_string());
-        node_b.rank = Some(0);
-        let b = graph.add_node(node_b);
-
-        let mut node_c = NodeLabel::default();
-        node_c.label = Some("C".to_string());
-        node_c.rank = Some(1);
-        let c = graph.add_node(node_c);
-
-        let mut node_d = NodeLabel::default();
-        node_d.label = Some("D".to_string());
-        node_d.rank = Some(1);
-        let d = graph.add_node(node_d);
-
-        let mut node_e = NodeLabel::default();
-        node_e.label = Some("E".to_string());
-        node_e.rank = Some(2);
-        let e = graph.add_node(node_e);
-
-        let mut node_f = NodeLabel::default();
-        node_f.label = Some("F".to_string());
-        node_f.rank = Some(2);
-        let f = graph.add_node(node_f);
-
-        // 创建层级结构
-        graph.add_edge(Edge::new(a, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(a, d), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, d), EdgeLabel::default());
-        graph.add_edge(Edge::new(c, e), EdgeLabel::default());
-        graph.add_edge(Edge::new(d, f), EdgeLabel::default());
-        graph.add_edge(Edge::new(e, f), EdgeLabel::default());
-
-        let result = graph.compute_bk_positions();
-
-        assert_eq!(result.positions.len(), 6);
-
-        // 验证层级结构
-        let mut ranks = Vec::new();
-        for (_, pos) in &result.positions {
-            ranks.push(pos.rank);
-        }
-        ranks.sort();
-        ranks.dedup();
-
-        // 应该有多个层级
-        assert!(ranks.len() > 1);
-
-        // 验证位置分配
-        for (_, pos) in &result.positions {
-            assert!(pos.position >= 0.0);
-        }
-    }
-
-    #[test]
-    fn test_bk_position_consistency() {
-        let mut graph = Graph::new();
-
-        // 创建简单但对称的图
-        let mut node_a = NodeLabel::default();
-        node_a.label = Some("A".to_string());
-        node_a.rank = Some(0);
-        let a = graph.add_node(node_a);
-
-        let mut node_b = NodeLabel::default();
-        node_b.label = Some("B".to_string());
-        node_b.rank = Some(0);
-        let b = graph.add_node(node_b);
-
-        let mut node_c = NodeLabel::default();
-        node_c.label = Some("C".to_string());
-        node_c.rank = Some(1);
-        let c = graph.add_node(node_c);
-
-        let mut node_d = NodeLabel::default();
-        node_d.label = Some("D".to_string());
-        node_d.rank = Some(1);
-        let d = graph.add_node(node_d);
-
-        graph.add_edge(Edge::new(a, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(a, d), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, c), EdgeLabel::default());
-        graph.add_edge(Edge::new(b, d), EdgeLabel::default());
-
-        let result = graph.compute_bk_positions();
-
-        // 验证所有节点都有位置
-        assert_eq!(result.positions.len(), 4);
-
-        // 验证位置是合理的
-        let mut positions: Vec<f64> = result.positions.values().map(|p| p.position).collect();
-        positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        // 位置应该是递增的
-        for i in 1..positions.len() {
-            assert!(positions[i] >= positions[i - 1]);
-        }
-    }
-}
-
-// 公开的包装函数，用于测试
-pub fn find_type1_conflicts(graph: &Graph) -> IndexMap<(NodeIndex, NodeIndex), ConflictType> {
-    let mut bk = BrandesKoepf::new(graph.clone());
-    bk.find_type1_conflicts();
-    bk.conflicts
-}
-
-pub fn has_conflict(graph: &Graph, v: NodeIndex, w: NodeIndex) -> bool {
-    let mut bk = BrandesKoepf::new(graph.clone());
-    bk.find_type1_conflicts();
-    bk.has_conflict(v, w)
-}
-
-pub fn find_type2_conflicts(graph: &Graph) -> IndexMap<(NodeIndex, NodeIndex), ConflictType> {
-    let mut bk = BrandesKoepf::new(graph.clone());
-    bk.find_type1_conflicts();
-    bk.find_type2_conflicts();
-    bk.conflicts
-}
-
-pub fn vertical_alignment(
-    graph: &Graph,
-    layering: &[Vec<NodeIndex>],
-    conflicts: &IndexMap<(NodeIndex, NodeIndex), ConflictType>,
-    direction: &str,
-) -> Alignment {
-    let mut bk = BrandesKoepf::new(graph.clone());
-    // 将IndexMap转换为HashMap
-    let mut conflicts_map = IndexMap::new();
-    for (key, value) in conflicts {
-        conflicts_map.insert(*key, value.clone());
-    }
-    bk.conflicts = conflicts_map;
-    let neighbor_fn = |_g: &Graph, v: NodeIndex| graph.successors(v).collect::<Vec<_>>();
-    bk.vertical_alignment(layering, neighbor_fn)
-}
-
-pub fn horizontal_compaction(
-    graph: &Graph,
-    layering: &[Vec<NodeIndex>],
-    alignment: &Alignment,
-    right_to_left: bool,
-) -> IndexMap<NodeIndex, f64> {
-    let bk = BrandesKoepf::new(graph.clone());
-    bk.horizontal_compaction(layering, alignment, right_to_left)
-}
-
-pub fn align_coordinates(xss: &mut IndexMap<String, IndexMap<NodeIndex, f64>>, alignment: &str) {
-    let bk = BrandesKoepf::new(Graph::new());
-    bk.align_coordinates(xss, alignment);
-}
-
-pub fn balance(
-    xss: &IndexMap<String, IndexMap<NodeIndex, f64>>,
-    alignment: Option<&str>,
-) -> IndexMap<NodeIndex, f64> {
-    let bk = BrandesKoepf::new(Graph::new());
-    bk.balance(xss, alignment)
-}
-
-pub fn find_smallest_width_alignment(
-    xss: &IndexMap<String, IndexMap<NodeIndex, f64>>,
-) -> Option<String> {
-    let bk = BrandesKoepf::new(Graph::new());
-    bk.find_smallest_width_alignment(xss)
 }

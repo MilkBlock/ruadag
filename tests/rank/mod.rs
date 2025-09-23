@@ -1,1 +1,1 @@
-// Rank tests module - tests will be added here
+pub mod rank_tests;

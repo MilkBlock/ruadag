@@ -5,7 +5,6 @@ pub mod bk;
 use crate::counters::*;
 use crate::graph::Graph;
 use crate::util::build_layer_matrix;
-use petgraph::graph::NodeIndex;
 
 /// 计算节点位置
 ///
@@ -13,15 +12,16 @@ use petgraph::graph::NodeIndex;
 pub fn position(graph: &mut Graph) {
     position_y(graph);
 
-    let x_positions = {
+    let bk_result = {
         increment_bk();
-        bk::position_x(graph)
+        let mut bk = bk::BrandesKoepf::new(graph.clone());
+        bk.run()
     };
 
     // 分配X坐标
-    for (node_id, x) in x_positions {
+    for (node_id, position) in bk_result.positions {
         if let Some(label) = graph.node_label_mut(node_id) {
-            label.x = Some(x);
+            label.x = Some(position.position);
         }
     }
 }

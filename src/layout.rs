@@ -2,13 +2,13 @@
 
 use crate::counters::*;
 use crate::graph::Graph;
+use crate::graph::NodeIndex;
 use crate::order::order;
 use crate::position::position;
 use crate::rank::rank;
 use crate::types::*;
 use crate::util::time;
 use indexmap::IndexMap;
-use petgraph::graph::NodeIndex;
 
 fn log_graph_state(graph: &Graph, stage: &str) {
     println!("\n--- {} 图状态 ---", stage);
@@ -976,13 +976,6 @@ fn acyclic_undo(graph: &mut Graph) {
             graph.remove_edge(&edge);
         }
     }
-}
-
-/// a wrapper for LayoutGraph
-#[derive(Clone)]
-pub struct LayoutGraph {
-    graph: Graph,
-    mapping: IndexMap<NodeIndex, NodeIndex>,
 }
 
 /// 更新输入图
