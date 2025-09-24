@@ -40,7 +40,6 @@ pub fn build_layer_matrix(graph: &Graph) -> Vec<Vec<NodeIndex>> {
                         }
                         // 使用原始节点ID，但确保它属于正确的图
                         layer[order as usize] = node_id;
-                        println!("rank is {:?}", label.rank);
                     } else {
                         // 如果没有 order，直接 push
                         layer.push(node_id);
@@ -156,11 +155,11 @@ pub fn normalize_ranks(graph: &mut Graph) {
     for node_id in graph.node_indices() {
         if let Some(label) = graph.node_label(node_id) {
             if let Some(rank) = label.rank {
+                println!("get rank {}", rank);
                 nodes_to_update.push((node_id, rank - min_rank));
             }
         }
     }
-
     // 更新节点排名
     for (node_id, new_rank) in nodes_to_update {
         if let Some(label) = graph.node_label_mut(node_id) {
@@ -178,12 +177,18 @@ pub fn remove_empty_ranks(graph: &mut Graph) {
     let mut rank_shift = IndexMap::new();
     let mut current_rank = 0;
 
+    // 构建 rank 映射，跳过空层级
     for rank in min_rank_val..=max_rank_val {
         let adjusted_rank = (rank - min_rank_val) as usize;
         if adjusted_rank < layers.len() && !layers[adjusted_rank].is_empty() {
             rank_shift.insert(rank, current_rank);
             current_rank += 1;
         }
+    }
+
+    // 如果没有空层级需要移除，直接返回
+    if rank_shift.len() == (max_rank_val - min_rank_val + 1) as usize {
+        return;
     }
 
     // 收集需要更新的节点

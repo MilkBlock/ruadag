@@ -164,7 +164,7 @@ pub fn slack(graph: &Graph, edge: &Edge) -> i32 {
         .unwrap_or(0);
     let min_len = graph.edge_label(edge).map(|l| l.minlen as i32).unwrap_or(1);
 
-    target_rank - source_rank - min_len
+    target_rank.saturating_sub(source_rank).saturating_sub(min_len)
 }
 
 /// 检查图是否为DAG

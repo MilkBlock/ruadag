@@ -53,22 +53,12 @@ pub fn position(graph: &mut Graph) {
 /// 计算Y坐标
 ///
 /// 对应 JS 函数: positionY() in lib/position/index.js
-fn position_y(graph: &mut Graph) {
-    println!("=== position_y 开始 ===");
-    println!("节点 rank 信息:");
-    for node_id in graph.node_indices() {
-        if let Some(label) = graph.node_label(node_id) {
-            println!("  节点 {:?}: rank = {:?}", node_id, label.rank);
-        }
-    }
-
+pub fn position_y(graph: &mut Graph) {
     let layering = build_layer_matrix(graph);
-    println!("构建的层级矩阵: {:?}", layering);
-
     let rank_sep = graph.config().rank_sep;
     let mut prev_y = 0.0;
 
-    for (layer_index, layer) in layering.iter().enumerate() {
+    for layer in layering {
         if !layer.is_empty() {
             // 计算该层中节点的最大高度
             let max_height = layer
@@ -77,47 +67,15 @@ fn position_y(graph: &mut Graph) {
                 .map(|label| label.height)
                 .fold(0.0, f64::max);
 
-            // 对于子图结构，我们需要根据节点的层次关系来分配Y坐标
-            // 首先按父节点分组
-            let mut parent_groups: std::collections::HashMap<
-                Option<crate::graph::NodeIndex>,
-                Vec<crate::graph::NodeIndex>,
-            > = std::collections::HashMap::new();
-
+            // 设置该层所有节点的Y坐标
             for node_id in layer {
-                if let Some(label) = graph.node_label(*node_id) {
-                    let parent = label.parent;
-                    parent_groups
-                        .entry(parent)
-                        .or_insert_with(Vec::new)
-                        .push(*node_id);
+                if let Some(label) = graph.node_label_mut(node_id) {
+                    label.y = Some(prev_y + max_height / 2.0);
                 }
-            }
-
-            // 为每个父节点组分配Y坐标
-            let mut group_y_offset = 0.0;
-            for (parent, group_nodes) in parent_groups {
-                // 计算该组中节点的最大高度
-                let group_max_height = group_nodes
-                    .iter()
-                    .filter_map(|node_id| graph.node_label(*node_id))
-                    .map(|label| label.height)
-                    .fold(0.0, f64::max);
-
-                // 设置该组所有节点的Y坐标
-                for node_id in group_nodes {
-                    if let Some(label) = graph.node_label_mut(node_id) {
-                        label.y = Some(prev_y + group_y_offset + group_max_height / 2.0);
-                        label.rank = Some(layer_index as i32);
-                    }
-                }
-
-                // 为下一个组增加Y偏移
-                group_y_offset += group_max_height + rank_sep;
             }
 
             // 更新下一层的起始Y坐标
-            prev_y += group_y_offset;
+            prev_y += max_height + rank_sep;
         }
     }
 }

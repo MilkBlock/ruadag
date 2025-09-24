@@ -190,6 +190,16 @@ impl BrandesKoepf {
         }
     }
 
+    /// 获取 ranks 信息（用于调试）
+    pub fn get_ranks(&self) -> &IndexMap<NodeIndex, i32> {
+        &self.ranks
+    }
+    
+    /// 获取 layers 信息（用于调试）
+    pub fn get_layers(&self) -> &Vec<Vec<NodeIndex>> {
+        &self.layers
+    }
+
     /// 运行 Brandes-Köpf 算法
     ///
     /// # Examples

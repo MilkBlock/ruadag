@@ -1,287 +1,615 @@
-//! 网络单纯形算法
+//! 网络单纯形算法 - 精确复现JavaScript版本
 
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeIndex};
 use crate::types::*;
-// use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashSet;
 
-/// 网络单纯形算法
+/// 网络单纯形算法 - 精确复现JavaScript版本
 pub fn network_simplex(graph: &mut Graph) {
-    // 首先使用最长路径算法获取初始排名
+    // 1. 简化图
+    // simplify(g) - 在Rust中我们假设图已经是简化的
+
+    // 2. 初始化rank
     super::util::longest_path(graph);
 
-    // 创建辅助图
-    let mut aux_graph = create_auxiliary_graph(graph);
+    // 3. 构建feasible tree
+    feasible_tree(graph);
 
-    // 使用网络单纯形算法优化
-    optimize_with_network_simplex(graph, &mut aux_graph);
+    // 4. 初始化low/lim值
+    init_low_lim_values(graph);
+
+    // 5. 初始化cut值
+    init_cut_values(graph);
+
+    // 6. 迭代优化
+    loop {
+        if let Some(leave_edge) = leave_edge(graph) {
+            let enter_edge = enter_edge(graph, &leave_edge);
+            exchange_edges(graph, &leave_edge, &enter_edge);
+        } else {
+            break;
+        }
+    }
 }
 
-/// 创建辅助图用于网络单纯形算法
-fn create_auxiliary_graph(graph: &Graph) -> Graph {
-    let mut aux_graph = Graph::new();
-    let mut node_mapping = std::collections::HashMap::new();
+/// 构建feasible tree - 精确复现JavaScript版本
+fn feasible_tree(graph: &mut Graph) {
+    // 选择任意节点作为起始点
+    let start = graph.node_indices().next().unwrap();
+    let size = graph.node_count();
 
-    // 添加源节点
-    let _source = "source".to_string();
-    let source_node = aux_graph.add_node(NodeLabel::default());
+    // 使用HashSet来跟踪树中的节点
+    let mut tree_nodes = std::collections::HashSet::new();
+    tree_nodes.insert(start);
 
-    // 添加所有原始节点
-    for node_id in graph.node_indices() {
-        let new_node_id = aux_graph.add_node(NodeLabel::default());
-        node_mapping.insert(node_id, new_node_id);
-
-        // 从源节点到每个节点的边
-        let source_edge = Edge::new(source_node, new_node_id);
-        let mut source_label = EdgeLabel::default();
-        source_label.weight = 1.0;
-        source_label.minlen = 0;
-        let _ = aux_graph.add_edge(source_edge, source_label);
+    // 迭代构建tight tree
+    while tight_tree(graph, &mut tree_nodes) < size {
+        let edge = find_min_slack_edge_for_tree(graph, &tree_nodes);
+        let delta = if tree_nodes.contains(&edge.source) {
+            super::util::slack(graph, &edge) as i32
+        } else {
+            -(super::util::slack(graph, &edge) as i32)
+        };
+        shift_ranks_for_tree(graph, &tree_nodes, delta);
     }
 
-    // 添加原始图中的边
+    // 建立树关系 - 将tight edges标记为树边
+    establish_tree_relationships(graph, &tree_nodes);
+}
+
+/// 建立树关系 - 将tight edges标记为树边
+fn establish_tree_relationships(
+    graph: &mut Graph,
+    tree_nodes: &std::collections::HashSet<NodeIndex>,
+) {
+    // 首先清除所有现有的树边标记
     for edge in graph.edges() {
-        if let (Some(&new_source), Some(&new_target)) = (
-            node_mapping.get(&edge.source),
-            node_mapping.get(&edge.target)
-        ) {
-            let mut edge_label = EdgeLabel::default();
-            if let Some(original_label) = graph.edge_label(&edge) {
-                edge_label.minlen = original_label.minlen;
-                edge_label.weight = original_label.weight;
-            }
-            let new_edge = Edge::new(new_source, new_target);
-            let _ = aux_graph.add_edge(new_edge, edge_label);
+        if let Some(edge_label) = graph.edge_label_mut(&edge) {
+            edge_label.cutvalue = None; // 清除cut值
         }
     }
 
-    aux_graph
-}
+    // 找到所有tight edges并标记为树边
+    let mut visited = std::collections::HashSet::new();
+    let mut parent_map = std::collections::HashMap::new();
 
-/// 使用网络单纯形算法优化
-fn optimize_with_network_simplex(graph: &mut Graph, _aux_graph: &mut Graph) {
-    let mut improved = true;
-    let mut iterations = 0;
-    let max_iterations = 1000;
+    fn dfs_establish_tree(
+        graph: &mut Graph,
+        tree_nodes: &std::collections::HashSet<NodeIndex>,
+        visited: &mut std::collections::HashSet<NodeIndex>,
+        parent_map: &mut std::collections::HashMap<NodeIndex, NodeIndex>,
+        v: NodeIndex,
+    ) {
+        visited.insert(v);
 
-    while improved && iterations < max_iterations {
-        improved = false;
-        iterations += 1;
-
-        // 找到需要优化的边
-        let mut edges_to_optimize = Vec::new();
-
-        for edge in graph.edges() {
-            if let Some(_edge_label) = graph.edge_label(&edge) {
-                let slack = super::util::slack(graph, &edge);
-                if slack > 0 {
-                    edges_to_optimize.push((edge, slack));
+        for edge in graph.out_edges(v) {
+            let w = edge.target;
+            if tree_nodes.contains(&w)
+                && !visited.contains(&w)
+                && super::util::slack(graph, &edge) == 0
+            {
+                parent_map.insert(w, v);
+                if let Some(edge_label) = graph.edge_label_mut(&edge) {
+                    edge_label.cutvalue = Some(0); // 标记为树边
                 }
+                dfs_establish_tree(graph, tree_nodes, visited, parent_map, w);
             }
         }
 
-        // 按松弛度排序，优先处理松弛度大的边
-        edges_to_optimize.sort_by(|a, b| b.1.cmp(&a.1));
-
-        // 尝试优化每条边
-        for (edge, _slack) in edges_to_optimize {
-            if optimize_edge(graph, &edge) {
-                improved = true;
-                break; // 一次只优化一条边
-            }
-        }
-    }
-}
-
-/// 优化单条边
-fn optimize_edge(graph: &mut Graph, edge: &Edge) -> bool {
-    if let Some(edge_label) = graph.edge_label(edge) {
-        let current_slack = super::util::slack(graph, edge);
-
-        if current_slack <= 0 {
-            return false;
-        }
-
-        // 尝试调整目标节点的排名
-        if let Some(source_label) = graph.node_label(edge.source) {
-            let source_rank = source_label.rank.unwrap_or(0);
-            let min_len = edge_label.minlen as i32;
-            let new_rank = source_rank + min_len;
-
-            if let Some(target_label) = graph.node_label_mut(edge.target) {
-                let current_rank = target_label.rank.unwrap_or(0);
-                if new_rank < current_rank {
-                    target_label.rank = Some(new_rank);
-                    return true;
+        for edge in graph.in_edges(v) {
+            let w = edge.source;
+            if tree_nodes.contains(&w)
+                && !visited.contains(&w)
+                && super::util::slack(graph, &edge) == 0
+            {
+                parent_map.insert(w, v);
+                if let Some(edge_label) = graph.edge_label_mut(&edge) {
+                    edge_label.cutvalue = Some(0); // 标记为树边
                 }
+                dfs_establish_tree(graph, tree_nodes, visited, parent_map, w);
             }
         }
     }
 
-    false
+    // 从起始节点开始建立树关系
+    let start = tree_nodes.iter().next().unwrap();
+    dfs_establish_tree(graph, tree_nodes, &mut visited, &mut parent_map, *start);
+
+    // 设置父节点关系
+    for (child, parent) in parent_map {
+        if let Some(node_label) = graph.node_label_mut(child) {
+            node_label.parent = Some(parent);
+        }
+    }
 }
 
-/// 计算网络流成本
-pub fn calculate_flow_cost(graph: &Graph) -> f64 {
-    let mut cost = 0.0;
+/// 找到tight edges的最大树并返回节点数
+fn tight_tree(graph: &Graph, tree_nodes: &mut std::collections::HashSet<NodeIndex>) -> usize {
+    let mut visited = HashSet::new();
 
-    for edge in graph.edges() {
-        if let Some(edge_label) = graph.edge_label(&edge) {
-            let slack = super::util::slack(graph, &edge);
-            cost += edge_label.weight * slack as f64;
+    fn dfs(
+        graph: &Graph,
+        tree_nodes: &mut std::collections::HashSet<NodeIndex>,
+        visited: &mut HashSet<NodeIndex>,
+        v: NodeIndex,
+    ) {
+        visited.insert(v);
+
+        for edge in graph.out_edges(v) {
+            let w = edge.target;
+            if !visited.contains(&w)
+                && !tree_nodes.contains(&w)
+                && super::util::slack(graph, &edge) == 0
+            {
+                tree_nodes.insert(w);
+                dfs(graph, tree_nodes, visited, w);
+            }
+        }
+
+        for edge in graph.in_edges(v) {
+            let w = edge.source;
+            if !visited.contains(&w)
+                && !tree_nodes.contains(&w)
+                && super::util::slack(graph, &edge) == 0
+            {
+                tree_nodes.insert(w);
+                dfs(graph, tree_nodes, visited, w);
+            }
         }
     }
 
-    cost
+    let nodes: Vec<NodeIndex> = tree_nodes.iter().cloned().collect();
+    for node in nodes {
+        if !visited.contains(&node) {
+            dfs(graph, tree_nodes, &mut visited, node);
+        }
+    }
+
+    tree_nodes.len()
 }
 
-/// 找到最小成本边
-pub fn find_min_cost_edge(graph: &Graph) -> Option<Edge> {
-    let mut min_cost = f64::INFINITY;
+/// 找到最小slack的边
+fn find_min_slack_edge_for_tree(
+    graph: &Graph,
+    tree_nodes: &std::collections::HashSet<NodeIndex>,
+) -> Edge {
+    let mut min_slack = f64::INFINITY;
     let mut min_edge = None;
 
     for edge in graph.edges() {
-        if let Some(edge_label) = graph.edge_label(&edge) {
-            let slack = super::util::slack(graph, &edge);
-            let cost = edge_label.weight * slack as f64;
+        let source_in_tree = tree_nodes.contains(&edge.source);
+        let target_in_tree = tree_nodes.contains(&edge.target);
 
-            if cost < min_cost {
-                min_cost = cost;
-                min_edge = Some(edge);
+        let edge_slack = if source_in_tree != target_in_tree {
+            super::util::slack(graph, &edge) as f64
+        } else {
+            f64::INFINITY
+        };
+
+        if edge_slack < min_slack {
+            min_slack = edge_slack;
+            min_edge = Some(edge);
+        }
+    }
+
+    min_edge.unwrap()
+}
+
+/// 调整rank值
+fn shift_ranks_for_tree(
+    graph: &mut Graph,
+    tree_nodes: &std::collections::HashSet<NodeIndex>,
+    delta: i32,
+) {
+    // 直接遍历tree_nodes中的所有节点
+    for node in tree_nodes {
+        if let Some(label) = graph.node_label_mut(*node) {
+            if let Some(rank) = label.rank {
+                label.rank = Some(rank + delta);
+            }
+        }
+    }
+}
+
+/// 初始化low/lim值 - 精确复现JavaScript版本
+fn init_low_lim_values(graph: &mut Graph) {
+    // 找到根节点（没有父节点的节点）
+    let root = graph
+        .node_indices()
+        .find(|&node| {
+            if let Some(label) = graph.node_label(node) {
+                label.parent.is_none()
+            } else {
+                false
+            }
+        })
+        .unwrap();
+
+    dfs_assign_low_lim(graph, &mut HashSet::new(), 1, root, None);
+}
+
+/// DFS分配low/lim值
+fn dfs_assign_low_lim(
+    graph: &mut Graph,
+    visited: &mut HashSet<NodeIndex>,
+    mut next_lim: i32,
+    v: NodeIndex,
+    parent: Option<NodeIndex>,
+) -> i32 {
+    let low = next_lim;
+    let mut label = graph.node_label_mut(v).unwrap().clone();
+
+    visited.insert(v);
+
+    // 遍历邻居节点，只考虑树边
+    for edge in graph.out_edges(v) {
+        let w = edge.target;
+        if !visited.contains(&w) && is_tree_edge(graph, v, w) {
+            next_lim = dfs_assign_low_lim(graph, visited, next_lim, w, Some(v));
+        }
+    }
+
+    for edge in graph.in_edges(v) {
+        let w = edge.source;
+        if !visited.contains(&w) && is_tree_edge(graph, w, v) {
+            next_lim = dfs_assign_low_lim(graph, visited, next_lim, w, Some(v));
+        }
+    }
+
+    label.low = Some(low);
+    label.lim = Some(next_lim);
+    if let Some(p) = parent {
+        label.parent = Some(p);
+    } else {
+        label.parent = None;
+    }
+
+    *graph.node_label_mut(v).unwrap() = label;
+    next_lim + 1
+}
+
+/// 初始化cut值
+fn init_cut_values(graph: &mut Graph) {
+    // 获取后序遍历的节点（除了根节点）
+    let mut vs = postorder(graph);
+    if !vs.is_empty() {
+        vs.pop(); // 移除根节点
+    }
+
+    for v in vs {
+        assign_cut_value(graph, v);
+    }
+}
+
+/// 分配cut值
+fn assign_cut_value(graph: &mut Graph, child: NodeIndex) {
+    let child_label = graph.node_label(child).unwrap();
+    if let Some(parent) = child_label.parent {
+        let cut_value = calc_cut_value(graph, child);
+        if let Some(edge_label) = graph.edge_label_mut(&Edge::new(child, parent)) {
+            edge_label.cutvalue = Some(cut_value);
+        } else if let Some(edge_label) = graph.edge_label_mut(&Edge::new(parent, child)) {
+            edge_label.cutvalue = Some(cut_value);
+        }
+    }
+}
+
+/// 计算cut值
+fn calc_cut_value(graph: &Graph, child: NodeIndex) -> i32 {
+    let child_label = graph.node_label(child).unwrap();
+    let parent = child_label.parent.unwrap();
+
+    // 确定child是否是边的尾部
+    let mut child_is_tail = true;
+    let mut graph_edge = graph.edge_label(&Edge::new(child, parent));
+
+    if graph_edge.is_none() {
+        child_is_tail = false;
+        graph_edge = graph.edge_label(&Edge::new(parent, child));
+    }
+
+    let mut cut_value = 0;
+    if let Some(edge_label) = graph_edge {
+        cut_value = edge_label.weight as i32;
+    }
+
+    // 遍历child的所有边
+    for edge in graph.out_edges(child) {
+        let other = edge.target;
+        if other != parent {
+            let is_out_edge = true;
+            let points_to_head = is_out_edge == child_is_tail;
+            let other_weight = graph
+                .edge_label(&edge)
+                .map(|e| e.weight as i32)
+                .unwrap_or(0);
+
+            cut_value += if points_to_head {
+                other_weight
+            } else {
+                -other_weight
+            };
+
+            if is_tree_edge(graph, child, other) {
+                if let Some(edge_label) = graph.edge_label(&Edge::new(child, other)) {
+                    if let Some(other_cut_value) = edge_label.cutvalue {
+                        cut_value += if points_to_head {
+                            -other_cut_value
+                        } else {
+                            other_cut_value
+                        };
+                    }
+                } else if let Some(edge_label) = graph.edge_label(&Edge::new(other, child)) {
+                    if let Some(other_cut_value) = edge_label.cutvalue {
+                        cut_value += if points_to_head {
+                            -other_cut_value
+                        } else {
+                            other_cut_value
+                        };
+                    }
+                }
             }
         }
     }
 
-    min_edge
+    for edge in graph.in_edges(child) {
+        let other = edge.source;
+        if other != parent {
+            let is_out_edge = false;
+            let points_to_head = is_out_edge == child_is_tail;
+            let other_weight = graph
+                .edge_label(&edge)
+                .map(|e| e.weight as i32)
+                .unwrap_or(0);
+
+            cut_value += if points_to_head {
+                other_weight
+            } else {
+                -other_weight
+            };
+
+            if is_tree_edge(graph, child, other) {
+                if let Some(edge_label) = graph.edge_label(&Edge::new(other, child)) {
+                    if let Some(other_cut_value) = edge_label.cutvalue {
+                        cut_value += if points_to_head {
+                            -other_cut_value
+                        } else {
+                            other_cut_value
+                        };
+                    }
+                } else if let Some(edge_label) = graph.edge_label(&Edge::new(child, other)) {
+                    if let Some(other_cut_value) = edge_label.cutvalue {
+                        cut_value += if points_to_head {
+                            -other_cut_value
+                        } else {
+                            other_cut_value
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    cut_value
 }
 
-/// 检查排名是否最优
-pub fn is_optimal(graph: &Graph) -> bool {
+/// 检查是否是树边
+fn is_tree_edge(graph: &Graph, u: NodeIndex, v: NodeIndex) -> bool {
+    if let Some(edge_label) = graph.edge_label(&Edge::new(u, v)) {
+        edge_label.cutvalue.is_some()
+    } else if let Some(edge_label) = graph.edge_label(&Edge::new(v, u)) {
+        edge_label.cutvalue.is_some()
+    } else {
+        false
+    }
+}
+
+/// 后序遍历
+fn postorder(graph: &Graph) -> Vec<NodeIndex> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+
+    fn dfs(
+        graph: &Graph,
+        visited: &mut HashSet<NodeIndex>,
+        result: &mut Vec<NodeIndex>,
+        v: NodeIndex,
+    ) {
+        visited.insert(v);
+
+        // 遍历所有邻居，只考虑树边
+        for edge in graph.out_edges(v) {
+            let w = edge.target;
+            if !visited.contains(&w) && is_tree_edge(graph, v, w) {
+                dfs(graph, visited, result, w);
+            }
+        }
+
+        for edge in graph.in_edges(v) {
+            let w = edge.source;
+            if !visited.contains(&w) && is_tree_edge(graph, w, v) {
+                dfs(graph, visited, result, w);
+            }
+        }
+
+        result.push(v);
+    }
+
+    let nodes: Vec<NodeIndex> = graph.node_indices().collect();
+    for node in nodes {
+        if !visited.contains(&node) {
+            dfs(graph, &mut visited, &mut result, node);
+        }
+    }
+
+    result
+}
+
+/// 找到离开边
+fn leave_edge(graph: &Graph) -> Option<Edge> {
     for edge in graph.edges() {
-        if let Some(_edge_label) = graph.edge_label(&edge) {
-            let slack = super::util::slack(graph, &edge);
-            if slack < 0 {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-/// 使用启发式方法改进排名
-pub fn improve_ranks_heuristic(graph: &mut Graph) {
-    let max_iterations = 100;
-    let mut iteration = 0;
-
-    while iteration < max_iterations && !is_optimal(graph) {
-        iteration += 1;
-
-        // 找到所有需要调整的边
-        let mut adjustments = Vec::new();
-
-        for edge in graph.edges() {
-            if let Some(_edge_label) = graph.edge_label(&edge) {
-                let slack = super::util::slack(graph, &edge);
-                if slack < 0 {
-                    let adjustment = -slack;
-                    adjustments.push((edge, adjustment));
-                }
-            }
-        }
-
-        // 按调整量排序
-        adjustments.sort_by(|a, b| b.1.cmp(&a.1));
-
-        // 应用调整
-        for (edge, adjustment) in adjustments {
-            if let Some(target_label) = graph.node_label_mut(edge.target) {
-                if let Some(current_rank) = target_label.rank {
-                    target_label.rank = Some(current_rank + adjustment);
+        if let Some(edge_label) = graph.edge_label(&edge) {
+            if let Some(cutvalue) = edge_label.cutvalue {
+                if cutvalue < 0 {
+                    return Some(edge);
                 }
             }
         }
     }
+    None
 }
 
-/// 计算排名范围
-pub fn calculate_rank_range(graph: &Graph) -> (i32, i32) {
-    let mut min_rank = i32::MAX;
-    let mut max_rank = i32::MIN;
+/// 找到进入边
+fn enter_edge(graph: &Graph, edge: &Edge) -> Edge {
+    let v = edge.source;
+    let w = edge.target;
 
-    for node_id in graph.node_indices() {
-        if let Some(label) = graph.node_label(node_id) {
-            if let Some(rank) = label.rank {
-                min_rank = min_rank.min(rank);
-                max_rank = max_rank.max(rank);
+    // 确保v是尾部，w是头部
+    let (v, w) = if !graph.has_edge(&Edge::new(v, w)) {
+        (w, v)
+    } else {
+        (v, w)
+    };
+
+    let v_label = graph.node_label(v).unwrap();
+    let w_label = graph.node_label(w).unwrap();
+    let mut tail_label = v_label;
+    let mut flip = false;
+
+    // 如果根在边的尾部，需要翻转逻辑
+    if v_label.lim.unwrap_or(0) > w_label.lim.unwrap_or(0) {
+        tail_label = w_label;
+        flip = true;
+    }
+
+    // 找到候选边
+    let mut candidates = Vec::new();
+    for candidate_edge in graph.edges() {
+        let candidate_v_label = graph.node_label(candidate_edge.source).unwrap();
+        let candidate_w_label = graph.node_label(candidate_edge.target).unwrap();
+
+        let v_is_descendant = is_descendant(graph, candidate_v_label, &tail_label);
+        let w_is_descendant = is_descendant(graph, candidate_w_label, &tail_label);
+
+        if flip == v_is_descendant && flip != w_is_descendant {
+            candidates.push(candidate_edge);
+        }
+    }
+
+    // 找到最小slack的边
+    candidates
+        .into_iter()
+        .min_by(|a, b| {
+            let slack_a = super::util::slack(graph, a);
+            let slack_b = super::util::slack(graph, b);
+            slack_a.partial_cmp(&slack_b).unwrap()
+        })
+        .unwrap()
+}
+
+/// 检查是否是后代
+fn is_descendant(_graph: &Graph, v_label: &NodeLabel, root_label: &NodeLabel) -> bool {
+    let v_lim = v_label.lim.unwrap_or(0);
+    let root_low = root_label.low.unwrap_or(0);
+    let root_lim = root_label.lim.unwrap_or(0);
+
+    root_low <= v_lim && v_lim <= root_lim
+}
+
+/// 交换边
+fn exchange_edges(graph: &mut Graph, e: &Edge, f: &Edge) {
+    // 移除旧边的树标记
+    if let Some(edge_label) = graph.edge_label_mut(e) {
+        edge_label.cutvalue = None;
+    }
+
+    // 添加新边的树标记
+    if let Some(edge_label) = graph.edge_label_mut(f) {
+        edge_label.cutvalue = Some(0);
+    }
+
+    // 重新初始化low/lim值
+    init_low_lim_values(graph);
+
+    // 重新初始化cut值
+    init_cut_values(graph);
+
+    // 更新rank
+    update_ranks(graph);
+}
+
+/// 更新rank
+fn update_ranks(graph: &mut Graph) {
+    // 找到根节点
+    let root = graph
+        .node_indices()
+        .find(|&v| graph.node_label(v).unwrap().parent.is_none())
+        .unwrap();
+
+    // 前序遍历
+    let mut vs = preorder(graph, root);
+    vs.remove(0); // 移除根节点
+
+    for v in vs {
+        let v_label = graph.node_label(v).unwrap();
+        if let Some(parent) = v_label.parent {
+            let mut edge = graph.edge_label(&Edge::new(v, parent));
+            let mut flipped = false;
+
+            if edge.is_none() {
+                edge = graph.edge_label(&Edge::new(parent, v));
+                flipped = true;
+            }
+
+            if let (Some(v_label), Some(parent_label), Some(edge_label)) =
+                (graph.node_label(v), graph.node_label(parent), edge)
+            {
+                if let (Some(_v_rank), Some(parent_rank)) = (v_label.rank, parent_label.rank) {
+                    let new_rank = if flipped {
+                        parent_rank + edge_label.minlen
+                    } else {
+                        parent_rank - edge_label.minlen
+                    };
+
+                    if let Some(v_label_mut) = graph.node_label_mut(v) {
+                        v_label_mut.rank = Some(new_rank);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 前序遍历
+fn preorder(graph: &Graph, root: NodeIndex) -> Vec<NodeIndex> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+
+    fn dfs(
+        graph: &Graph,
+        visited: &mut HashSet<NodeIndex>,
+        result: &mut Vec<NodeIndex>,
+        v: NodeIndex,
+    ) {
+        visited.insert(v);
+        result.push(v);
+
+        // 遍历所有邻居，只考虑树边
+        for edge in graph.out_edges(v) {
+            let w = edge.target;
+            if !visited.contains(&w) && is_tree_edge(graph, v, w) {
+                dfs(graph, visited, result, w);
+            }
+        }
+
+        for edge in graph.in_edges(v) {
+            let w = edge.source;
+            if !visited.contains(&w) && is_tree_edge(graph, w, v) {
+                dfs(graph, visited, result, w);
             }
         }
     }
 
-    (min_rank, max_rank)
-}
-
-/// 规范化排名
-pub fn normalize_ranks(graph: &mut Graph) {
-    let (min_rank, _) = calculate_rank_range(graph);
-
-    for node_id in graph.node_indices().collect::<Vec<_>>() {
-        if let Some(label) = graph.node_label_mut(node_id) {
-            if let Some(rank) = label.rank {
-                label.rank = Some(rank - min_rank);
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_network_simplex() {
-        let mut graph = Graph::new();
-        let a = graph.add_node(NodeLabel::default());
-        let b = graph.add_node(NodeLabel::default());
-        let c = graph.add_node(NodeLabel::default());
-
-        let edge_ab = Edge::new(a, b);
-        let edge_bc = Edge::new(b, c);
-
-        let mut label_ab = EdgeLabel::default();
-        label_ab.minlen = 2;
-        label_ab.weight = 1.0;
-        let mut label_bc = EdgeLabel::default();
-        label_bc.minlen = 3;
-        label_bc.weight = 1.0;
-
-        let _ = graph.add_edge(edge_ab, label_ab);
-        let _ = graph.add_edge(edge_bc, label_bc);
-
-        network_simplex(&mut graph);
-
-        assert!(is_optimal(&graph));
-    }
-
-    #[test]
-    fn test_calculate_flow_cost() {
-        let mut graph = Graph::new();
-        let a = graph.add_node(NodeLabel::default());
-        let b = graph.add_node(NodeLabel::default());
-
-        let edge = Edge::new(a, b);
-        let mut label = EdgeLabel::default();
-        label.minlen = 1;
-        label.weight = 2.0;
-        let _ = graph.add_edge(edge, label);
-
-        // 设置排名
-        if let Some(label_a) = graph.node_label_mut(a) {
-            label_a.rank = Some(0);
-        }
-        if let Some(label_b) = graph.node_label_mut(b) {
-            label_b.rank = Some(2);
-        }
-
-        let cost = calculate_flow_cost(&graph);
-        assert!(cost >= 0.0);
-    }
+    dfs(graph, &mut visited, &mut result, root);
+    result
 }

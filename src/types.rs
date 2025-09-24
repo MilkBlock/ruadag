@@ -149,6 +149,10 @@ pub struct NodeLabel {
     pub self_edges: Option<Vec<EdgeLabel>>,
     /// 边对象（用于虚拟节点）
     pub edge_obj: Option<Edge>,
+    /// low值（用于NetworkSimplex算法）
+    pub low: Option<i32>,
+    /// lim值（用于NetworkSimplex算法）
+    pub lim: Option<i32>,
     /// 自定义属性
     pub custom: IndexMap<String, serde_json::Value>,
 }
@@ -184,6 +188,8 @@ pub struct EdgeLabel {
     pub labeloffset: f64,
     /// 边标签的位置
     pub labelpos: LabelPosition,
+    /// cut值（用于NetworkSimplex算法）
+    pub cutvalue: Option<i32>,
     /// 自定义属性
     pub custom: IndexMap<String, serde_json::Value>,
 }
@@ -205,6 +211,7 @@ impl Default for EdgeLabel {
             forward_name: None,
             labeloffset: 10.0,
             labelpos: LabelPosition::default(),
+            cutvalue: None,
             custom: IndexMap::new(),
         }
     }

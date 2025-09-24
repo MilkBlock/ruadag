@@ -15,10 +15,15 @@ fn log_graph_state(graph: &Graph, stage: &str) {
     println!("节点:");
     for node_idx in graph.node_indices() {
         let node = graph.node_label(node_idx).unwrap();
-        // println!(
-        //     "  {:?}: rank={:?}, x={:?}, y={:?}, width={}, height={}",
-        //     node_idx, node.rank, node.x, node.y, node.width, node.height
-        // );
+        println!(
+            "  {}: rank={:?}, x={:?}, y={:?}, width={}, height={}",
+            node_idx.index(),
+            node.rank,
+            node.x,
+            node.y,
+            node.width,
+            node.height
+        );
     }
 
     println!("边:");
@@ -156,13 +161,16 @@ fn run_layout(graph: &mut Graph, opts: &LayoutOptions) {
     log_graph_state(graph, "rank前");
     increment_rank();
     rank(graph);
-    println!("--- 执行 rank 后 ---");
     log_graph_state(graph, "rank后");
 
     inject_edge_label_proxies(graph);
+    log_graph_state(graph, "inject_edge_label_proxies后");
     crate::util::remove_empty_ranks(graph);
+    log_graph_state(graph, "remove_empty_ranks后");
     nesting_graph_cleanup(graph);
+    log_graph_state(graph, "nesting_graph_cleanup后");
     crate::util::normalize_ranks(graph);
+    log_graph_state(graph, "normalize_ranks后");
     normalize_edges(graph); // 添加虚拟节点
     assign_rank_min_max(graph);
     remove_edge_label_proxies(graph);
@@ -177,17 +185,18 @@ fn run_layout(graph: &mut Graph, opts: &LayoutOptions) {
     log_graph_state(graph, "order后");
 
     insert_self_edges(graph);
+    log_graph_state(graph, "insert_self_edges后");
     crate::position::adjust_coordinate_system(graph);
 
-    println!("--- 执行 position 前 ---");
-    log_graph_state(graph, "position前");
+    log_graph_state(graph, "increment_position后");
     increment_position();
     position(graph);
-    println!("--- 执行 position 后 ---");
     log_graph_state(graph, "position后");
 
     position_self_edges(graph);
+    log_graph_state(graph, "position_self_edges后");
     remove_border_nodes(graph);
+    log_graph_state(graph, "remove_border_nodes后");
     fixup_edge_label_coords(graph);
     undo_coordinate_system(graph);
     crate::position::translate_graph(graph);
